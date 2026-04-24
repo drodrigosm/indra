@@ -6,6 +6,9 @@ from data_common import save_uploaded_file_to_temp
 from modules.dedicaciones import DedicacionesModule
 from ppt.dedicaciones_ppt import build_committee_presentation
 from ui_common import build_metric_card, inject_custom_theme, render_indra_branding
+from modules.compras_gpi import ComprasGpiModule
+from modules.compras_no_gpi import ComprasNoGpiModule
+from modules.almacenaje import AlmacenajeModule
 
 
 def run_app() -> None:
@@ -16,19 +19,28 @@ def run_app() -> None:
     st.title('Informe de Costes del Proyecto')
 
     dedicaciones_module = DedicacionesModule()
+    compras_gpi_module = ComprasGpiModule()
+    compras_no_gpi_module = ComprasNoGpiModule()
+    almacenaje_module = AlmacenajeModule()
 
-    uploaded_file = st.file_uploader('Carga el Excel de dedicaciones (.xls o .xlsx)', type=['xls', 'xlsx'])
-    uploaded_edt_file = st.file_uploader('Carga el Excel EDT de costes estimados (.xlsx)', type=['xlsx'], key='uploaded_edt_file')
+    with st.expander('Carga de ficheros del proyecto', expanded=True):
+        col_upload_1, col_upload_2, col_upload_3 = st.columns(3)
+        with col_upload_1:
+            uploaded_file = st.file_uploader('Dedicaciones personal', type=['xls', 'xlsx'], key='uploaded_dedicaciones_file')
+            uploaded_compras_gpi_file = st.file_uploader('Compras GPI', type=['xls', 'xlsx'], key='uploaded_compras_gpi_file')
+        with col_upload_2:
+            uploaded_edt_file = st.file_uploader('EDT costes estimados', type=['xlsx'], key='uploaded_edt_file')
+            uploaded_compras_no_gpi_file = st.file_uploader('Compras NO GPI', type=['xls', 'xlsx'], key='uploaded_compras_no_gpi_file')
+        with col_upload_3:
+            uploaded_almacenaje_files = st.file_uploader('Almacenaje', type=['xls', 'xlsx'], accept_multiple_files=True, key='uploaded_almacenaje_files')
+
     default_path = Path('DedicacionesS24B05_ENERO2024_ABRIL2026.xls')
 
     if uploaded_file is None and not default_path.exists():
         st.info('Carga el fichero Excel para generar el informe.')
         st.stop()
 
-    if uploaded_file is not None:
-        source_file = save_uploaded_file_to_temp(uploaded_file, 'costes_input_')
-    else:
-        source_file = default_path
+    source_file = save_uploaded_file_to_temp(uploaded_file, 'costes_input_') if uploaded_file is not None else default_path
 
     try:
         df = dedicaciones_module.load_dedicaciones_dataframe(source_file)
@@ -46,6 +58,42 @@ def run_app() -> None:
         except Exception as exc:
             st.error(f'No se ha podido procesar el fichero EDT: {exc}')
             edt_df = None
+
+    compras_gpi_df = None
+    compras_gpi_enabled = False
+    if uploaded_compras_gpi_file is not None:
+        try:
+            temp_compras_gpi_input = save_uploaded_file_to_temp(uploaded_compras_gpi_file, 'costes_compras_gpi_input_')
+            compras_gpi_df = compras_gpi_module.load_dataframe(temp_compras_gpi_input)
+            compras_gpi_enabled = compras_gpi_df is not None and not compras_gpi_df.empty
+        except Exception as exc:
+            st.error(f'No se ha podido procesar el fichero Compras GPI: {exc}')
+            compras_gpi_df = None
+            compras_gpi_enabled = False
+
+    compras_no_gpi_df = None
+    compras_no_gpi_enabled = False
+    if uploaded_compras_no_gpi_file is not None:
+        try:
+            temp_compras_input = save_uploaded_file_to_temp(uploaded_compras_no_gpi_file, 'costes_compras_no_gpi_input_')
+            compras_no_gpi_df = compras_no_gpi_module.load_dataframe(temp_compras_input)
+            compras_no_gpi_enabled = compras_no_gpi_df is not None and not compras_no_gpi_df.empty
+        except Exception as exc:
+            st.error(f'No se ha podido procesar el fichero Compras NO GPI: {exc}')
+            compras_no_gpi_df = None
+            compras_no_gpi_enabled = False
+
+    almacenaje_df = None
+    almacenaje_enabled = False
+    if uploaded_almacenaje_files:
+        try:
+            temp_almacenaje_paths = [save_uploaded_file_to_temp(uploaded_file_item, 'costes_almacenaje_input_') for uploaded_file_item in uploaded_almacenaje_files]
+            almacenaje_df = almacenaje_module.load_dataframes(temp_almacenaje_paths)
+            almacenaje_enabled = almacenaje_df is not None and not almacenaje_df.empty
+        except Exception as exc:
+            st.error(f'No se ha podido procesar el fichero de Almacenaje: {exc}')
+            almacenaje_df = None
+            almacenaje_enabled = False
 
     script_dir = Path(__file__).resolve().parent
     template_ppt_path = script_dir / 'template.pptx'
@@ -82,15 +130,50 @@ def run_app() -> None:
 
     st.markdown('---')
 
-    tab0, tab1, tab2, tab3, tab4 = st.tabs(['0. General', '1. Elemento + Departamento (Horas)', '2. Empleado + Nombre (Horas)', '3. Elemento + Departamento (Cantidad)', '4. Empleado + Nombre (Cantidad)'])
+    tab_names = ['0. General', '1. Elemento + Departamento (Horas)', '2. Empleado + Nombre (Horas)', '3. Elemento + Departamento (Cantidad)', '4. Empleado + Nombre (Cantidad)']
+    if compras_gpi_enabled:
+        tab_names.append('5. Compras GPI')
+    if compras_no_gpi_enabled:
+        tab_names.append('6. Compras NO GPI')
+    if almacenaje_enabled:
+        tab_names.append('7. Almacenaje')
 
-    with tab0:
+    tabs = st.tabs(tab_names)
+
+    with tabs[0]:
         dedicaciones_module.render_tab_general(filtered)
-    with tab1:
+    with tabs[1]:
         dedicaciones_module.render_tab_departamento_horas(filtered)
-    with tab2:
+    with tabs[2]:
         dedicaciones_module.render_tab_empleado_horas(filtered)
-    with tab3:
+    with tabs[3]:
         dedicaciones_module.render_tab_departamento_cantidad(filtered, edt_df)
-    with tab4:
+    with tabs[4]:
         dedicaciones_module.render_tab_empleado_cantidad(filtered)
+
+    current_tab_index = 5
+
+    if compras_gpi_enabled:
+        with tabs[current_tab_index]:
+            coste_total_proyecto = float(filtered['cantidad'].sum())
+            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
+                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
+            if almacenaje_enabled and almacenaje_df is not None:
+                coste_total_proyecto += float(almacenaje_df['cantidad'].sum())
+            compras_gpi_module.render_tab(compras_gpi_df, coste_total_proyecto=coste_total_proyecto)
+        current_tab_index += 1
+
+    if compras_no_gpi_enabled:
+        with tabs[current_tab_index]:
+            estimado_total = float(edt_df['estimado_rc'].sum()) if edt_df is not None and not edt_df.empty else None
+            compras_no_gpi_module.render_tab(compras_no_gpi_df, coste_interno_total=float(filtered['cantidad'].sum()), estimado_total=estimado_total)
+        current_tab_index += 1
+
+    if almacenaje_enabled:
+        with tabs[current_tab_index]:
+            coste_total_proyecto = float(filtered['cantidad'].sum())
+            if compras_gpi_enabled and compras_gpi_df is not None:
+                coste_total_proyecto += float(compras_gpi_df['cantidad'].sum())
+            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
+                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
+            almacenaje_module.render_tab(almacenaje_df, coste_total_proyecto=coste_total_proyecto)
