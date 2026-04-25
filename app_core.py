@@ -11,6 +11,7 @@ from modules.compras_gpi import ComprasGpiModule
 from modules.compras_no_gpi import ComprasNoGpiModule
 from modules.almacenaje import AlmacenajeModule
 from modules.global_filters import apply_global_filters, render_global_sidebar_filters
+from modules.gastos_viaje import GastosViajeModule
 
 
 
@@ -30,13 +31,39 @@ def count_unique_text_values(dataframes: list, column: str) -> int:
     return len(values)
 
 
-def build_project_summary(dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df) -> dict:
-    cost_dataframes = [dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df]
+def build_project_summary(dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df=None) -> dict:
+    cost_dataframes = [dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df]
     total_cost = sum([sum_numeric_column(item_df, 'cantidad') for item_df in cost_dataframes])
     total_hours = sum([sum_numeric_column(item_df, 'horas_aplicadas') for item_df in cost_dataframes])
     total_departments = count_unique_text_values(cost_dataframes, 'departamento')
     total_employees = count_unique_text_values(cost_dataframes, 'empleado')
     return {'total_cost': total_cost, 'total_hours': total_hours, 'total_departments': total_departments, 'total_employees': total_employees}
+
+def filename_contains(file_name: str, tokens: list[str], match_all: bool = False) -> bool:
+    normalized_name = file_name.upper()
+    normalized_tokens = [token.upper() for token in tokens]
+    return all(token in normalized_name for token in normalized_tokens) if match_all else any(token in normalized_name for token in normalized_tokens)
+
+
+def classify_uploaded_project_files(uploaded_files: list) -> dict:
+    classified = {'dedicaciones': None, 'edt': None, 'compras_gpi': None, 'compras_no_gpi': None, 'almacenaje': [], 'gastos_viaje': [], 'ignored': []}
+    for uploaded_file in uploaded_files or []:
+        file_name = uploaded_file.name.upper()
+        if filename_contains(file_name, ['DEDICACIONES', 'ISPR_25D']):
+            classified['dedicaciones'] = uploaded_file
+        elif filename_contains(file_name, ['ISPR_25C']):
+            classified['compras_no_gpi'] = uploaded_file
+        elif filename_contains(file_name, ['ISPR25PX']):
+            classified['compras_gpi'] = uploaded_file
+        elif filename_contains(file_name, ['ISPR_25S', 'ISPR_25U']):
+            classified['almacenaje'].append(uploaded_file)
+        elif filename_contains(file_name, ['ISPR_25F', 'ISPR_25G']):
+            classified['gastos_viaje'].append(uploaded_file)
+        elif filename_contains(file_name, ['EDT']):
+            classified['edt'] = uploaded_file
+        else:
+            classified['ignored'].append(uploaded_file.name)
+    return classified
 
 def run_app() -> None:
     st.set_page_config(page_title='Informe de Costes del Proyecto', layout='wide')
@@ -49,38 +76,34 @@ def run_app() -> None:
     compras_gpi_module = ComprasGpiModule()
     compras_no_gpi_module = ComprasNoGpiModule()
     almacenaje_module = AlmacenajeModule()
+    gastos_viaje_module = GastosViajeModule()
 
-    with st.expander('Carga de ficheros del proyecto', expanded=True):
-        col_upload_1, col_upload_2, col_upload_3 = st.columns(3)
-        with col_upload_1:
-            uploaded_file = st.file_uploader('Dedicaciones personal', type=['xls', 'xlsx'], key='uploaded_dedicaciones_file')
-            uploaded_compras_gpi_file = st.file_uploader('Compras GPI', type=['xls', 'xlsx'], key='uploaded_compras_gpi_file')
-        with col_upload_2:
-            uploaded_edt_file = st.file_uploader('EDT costes estimados', type=['xlsx'], key='uploaded_edt_file')
-            uploaded_compras_no_gpi_file = st.file_uploader('Compras NO GPI', type=['xls', 'xlsx'], key='uploaded_compras_no_gpi_file')
-        with col_upload_3:
-            uploaded_almacenaje_files = st.file_uploader('Almacenaje', type=['xls', 'xlsx'], accept_multiple_files=True, key='uploaded_almacenaje_files')
+    with st.expander('Carga de carpeta del proyecto', expanded=True):
+        uploaded_project_files = st.file_uploader('Selecciona la carpeta del proyecto', type=['xls', 'xlsx'], accept_multiple_files='directory', key='uploaded_project_folder')
+        st.caption('La app detecta automáticamente: Dedicaciones, Compras NO GPI, Compras GPI, Almacenaje y Gastos de Viaje según el nombre del fichero.')
+    classified_files = classify_uploaded_project_files(uploaded_project_files)
+    if classified_files['ignored']:
+        st.warning('Ficheros ignorados por no coincidir con ninguna regla: ' + ', '.join(classified_files['ignored']))
 
-    default_path = Path('DedicacionesS24B05_ENERO2024_ABRIL2026.xls')
-
-    if uploaded_file is None and not default_path.exists():
-        st.info('Carga el fichero Excel para generar el informe.')
-        st.stop()
-
-    source_file = save_uploaded_file_to_temp(uploaded_file, 'costes_input_') if uploaded_file is not None else default_path
-
-    try:
-        df = dedicaciones_module.load_dedicaciones_dataframe(source_file)
-    except Exception as exc:
-        st.error(f'No se ha podido procesar el fichero: {exc}')
-        st.stop()
-
-    filtered = df.copy()
+    df = None
+    filtered = None
+    dedicaciones_enabled = False
+    if classified_files['dedicaciones'] is not None:
+        try:
+            temp_dedicaciones_input = save_uploaded_file_to_temp(classified_files['dedicaciones'], 'costes_dedicaciones_input_')
+            df = dedicaciones_module.load_dedicaciones_dataframe(temp_dedicaciones_input)
+            filtered = df.copy()
+            dedicaciones_enabled = df is not None and not df.empty
+        except Exception as exc:
+            st.error(f'No se ha podido procesar el fichero de Dedicaciones: {exc}')
+            df = None
+            filtered = None
+            dedicaciones_enabled = False
 
     edt_df = None
-    if uploaded_edt_file is not None:
+    if classified_files['edt'] is not None:
         try:
-            temp_edt_input = save_uploaded_file_to_temp(uploaded_edt_file, 'costes_edt_input_')
+            temp_edt_input = save_uploaded_file_to_temp(classified_files['edt'], 'costes_edt_input_')
             edt_df = dedicaciones_module.load_edt_dataframe(temp_edt_input)
         except Exception as exc:
             st.error(f'No se ha podido procesar el fichero EDT: {exc}')
@@ -88,9 +111,9 @@ def run_app() -> None:
 
     compras_gpi_df = None
     compras_gpi_enabled = False
-    if uploaded_compras_gpi_file is not None:
+    if classified_files['compras_gpi'] is not None:
         try:
-            temp_compras_gpi_input = save_uploaded_file_to_temp(uploaded_compras_gpi_file, 'costes_compras_gpi_input_')
+            temp_compras_gpi_input = save_uploaded_file_to_temp(classified_files['compras_gpi'], 'costes_compras_gpi_input_')
             compras_gpi_df = compras_gpi_module.load_dataframe(temp_compras_gpi_input)
             compras_gpi_enabled = compras_gpi_df is not None and not compras_gpi_df.empty
         except Exception as exc:
@@ -100,9 +123,9 @@ def run_app() -> None:
 
     compras_no_gpi_df = None
     compras_no_gpi_enabled = False
-    if uploaded_compras_no_gpi_file is not None:
+    if classified_files['compras_no_gpi'] is not None:
         try:
-            temp_compras_input = save_uploaded_file_to_temp(uploaded_compras_no_gpi_file, 'costes_compras_no_gpi_input_')
+            temp_compras_input = save_uploaded_file_to_temp(classified_files['compras_no_gpi'], 'costes_compras_no_gpi_input_')
             compras_no_gpi_df = compras_no_gpi_module.load_dataframe(temp_compras_input)
             compras_no_gpi_enabled = compras_no_gpi_df is not None and not compras_no_gpi_df.empty
         except Exception as exc:
@@ -112,31 +135,49 @@ def run_app() -> None:
 
     almacenaje_df = None
     almacenaje_enabled = False
-    if uploaded_almacenaje_files:
+    if classified_files['almacenaje']:
         try:
-            temp_almacenaje_paths = [save_uploaded_file_to_temp(uploaded_file_item, 'costes_almacenaje_input_') for uploaded_file_item in uploaded_almacenaje_files]
+            temp_almacenaje_paths = [save_uploaded_file_to_temp(uploaded_file_item, 'costes_almacenaje_input_') for uploaded_file_item in classified_files['almacenaje']]
             almacenaje_df = almacenaje_module.load_dataframes(temp_almacenaje_paths)
             almacenaje_enabled = almacenaje_df is not None and not almacenaje_df.empty
         except Exception as exc:
             st.error(f'No se ha podido procesar el fichero de Almacenaje: {exc}')
             almacenaje_df = None
             almacenaje_enabled = False
+    
+    gastos_viaje_df = None
+    gastos_viaje_enabled = False
+    if classified_files['gastos_viaje']:
+        try:
+            temp_gastos_viaje_paths = [save_uploaded_file_to_temp(uploaded_file_item, 'costes_gastos_viaje_input_') for uploaded_file_item in classified_files['gastos_viaje']]
+            gastos_viaje_df = gastos_viaje_module.load_dataframes(temp_gastos_viaje_paths)
+            gastos_viaje_enabled = gastos_viaje_df is not None and not gastos_viaje_df.empty
+        except Exception as exc:
+            st.error(f'No se ha podido procesar el fichero de Gastos de Viaje: {exc}')
+            gastos_viaje_df = None
+            gastos_viaje_enabled = False
+
+    if not dedicaciones_enabled and not compras_gpi_enabled and not compras_no_gpi_enabled and not almacenaje_enabled and not gastos_viaje_enabled:
+        st.info('Carga al menos un fichero válido del proyecto para generar el informe.')
+        st.stop()
 
     script_dir = Path(__file__).resolve().parent
-    project_summary_total = build_project_summary(df, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
-    global_filters = render_global_sidebar_filters([df, compras_gpi_df, compras_no_gpi_df, almacenaje_df])
+    project_summary_total = build_project_summary(df, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df)
+    global_filters = render_global_sidebar_filters([df, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df])
     filtered = apply_global_filters(df, global_filters)
     compras_gpi_df = apply_global_filters(compras_gpi_df, global_filters)
     compras_no_gpi_df = apply_global_filters(compras_no_gpi_df, global_filters)
     almacenaje_df = apply_global_filters(almacenaje_df, global_filters)
+    gastos_viaje_df = apply_global_filters(gastos_viaje_df, global_filters)
     compras_gpi_enabled = compras_gpi_df is not None and not compras_gpi_df.empty
     compras_no_gpi_enabled = compras_no_gpi_df is not None and not compras_no_gpi_df.empty
     almacenaje_enabled = almacenaje_df is not None and not almacenaje_df.empty
-    project_summary_filtered = build_project_summary(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
+    gastos_viaje_enabled = gastos_viaje_df is not None and not gastos_viaje_df.empty
+    project_summary_filtered = build_project_summary(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df)
     template_ppt_path = script_dir / 'template.pptx'
 
     st.markdown('### Exportación PowerPoint')
-    st.caption('Genera y descarga una presentación clásica de comité de dirección con el dataset actual cargado en la app.')
+    
 
     if 'ppt_bytes' not in st.session_state:
         st.session_state.ppt_bytes = None
@@ -177,6 +218,8 @@ def run_app() -> None:
         tab_names.append('6. Compras NO GPI')
     if almacenaje_enabled:
         tab_names.append('7. Almacenaje')
+    if gastos_viaje_enabled:
+        tab_names.append('8. Gastos Viaje')
 
     tabs = st.tabs(tab_names)
 
@@ -216,4 +259,19 @@ def run_app() -> None:
                 coste_total_proyecto += float(compras_gpi_df['cantidad'].sum())
             if compras_no_gpi_enabled and compras_no_gpi_df is not None:
                 coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
+            if gastos_viaje_enabled and gastos_viaje_df is not None:
+                coste_total_proyecto += float(gastos_viaje_df['cantidad'].sum())
             almacenaje_module.render_tab(almacenaje_df, coste_total_proyecto=coste_total_proyecto)
+        current_tab_index += 1
+
+    if gastos_viaje_enabled:
+        with tabs[current_tab_index]:
+            coste_total_proyecto = float(filtered['cantidad'].sum())
+            if compras_gpi_enabled and compras_gpi_df is not None:
+                coste_total_proyecto += float(compras_gpi_df['cantidad'].sum())
+            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
+                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
+            if almacenaje_enabled and almacenaje_df is not None:
+                coste_total_proyecto += float(almacenaje_df['cantidad'].sum())
+            gastos_viaje_module.render_tab(gastos_viaje_df, coste_total_proyecto=coste_total_proyecto)
+        current_tab_index += 1

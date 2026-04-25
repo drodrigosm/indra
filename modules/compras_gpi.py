@@ -13,9 +13,8 @@ class ComprasGpiModule:
 
     def validate_file_name(self, file_path: Path) -> None:
         file_name = file_path.name.upper()
-        for token in self.REQUIRED_NAME_TOKENS:
-            if token not in file_name:
-                raise RuntimeError(f'El fichero de Compras GPI no es válido. El nombre debe incluir obligatoriamente "{token}".')
+        if 'ISPR25PX' not in file_name:
+            raise RuntimeError('El fichero de Compras GPI no es válido. El nombre debe incluir obligatoriamente "ISPR25PX".')
 
     def normalize_column_name(self, value: str) -> str:
         value = html.unescape(str(value).strip()).lower()

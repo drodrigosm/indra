@@ -24,9 +24,8 @@ class AlmacenajeModule:
 
     def validate_file_name(self, file_path: Path) -> None:
         file_name = file_path.name.upper()
-        for token in self.REQUIRED_NAME_TOKENS:
-            if token not in file_name:
-                raise RuntimeError(f'El fichero de Almacenaje no es válido. El nombre debe incluir obligatoriamente "{token}".')
+        if 'ISPR_25S' not in file_name and 'ISPR_25U' not in file_name:
+            raise RuntimeError('El fichero de Almacenaje no es válido. El nombre debe incluir obligatoriamente "ISPR_25S" o "ISPR_25U".')
 
     def normalize_column_name(self, value: str) -> str:
         value = html.unescape(str(value).strip()).lower()

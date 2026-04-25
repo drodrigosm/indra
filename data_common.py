@@ -19,7 +19,8 @@ def try_convert_xls_to_xlsx(input_path: Path) -> Path:
 
 
 def save_uploaded_file_to_temp(uploaded_file, prefix: str) -> Path:
-    temp_input = Path(tempfile.mkdtemp(prefix=prefix)) / uploaded_file.name
+    safe_file_name = Path(uploaded_file.name).name
+    temp_input = Path(tempfile.mkdtemp(prefix=prefix)) / safe_file_name
     temp_input.write_bytes(uploaded_file.getbuffer())
     return temp_input
 
