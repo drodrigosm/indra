@@ -271,8 +271,13 @@ class DedicacionesModule:
     def render_global_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
 
-    def render_tab_general(self, filtered: pd.DataFrame, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None) -> None:
+    def render_tab_general(self, filtered: pd.DataFrame, project_summary: dict | None = None, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None) -> None:
         st.subheader('Sección General · Evolución anual por departamento y empleado')
+
+        def build_value_with_pct(selected_value: float, total_value: float, decimals: int = 2) -> str:
+            pct = selected_value / total_value * 100 if total_value else 0
+            return f'{format_number(selected_value, decimals)} / {format_number(total_value, decimals)}<br><span style="font-size:0.95rem;color:#E3E2DA;font-weight:600;">{format_number(pct, 1)}% del total</span>'
+
         general_departamentos = ['Todos'] + sorted([v for v in filtered['departamento'].dropna().unique().tolist() if str(v).strip()])
         general_empleados = ['Todos'] + sorted([v for v in filtered['empleado'].dropna().unique().tolist() if str(v).strip()])
 
@@ -291,46 +296,27 @@ class DedicacionesModule:
         else:
             general_filtered_view = filtered.copy()
 
-        total_cost = project_summary_total['total_cost'] if project_summary_total else float(filtered['cantidad'].sum())
-        total_hours = project_summary_total['total_hours'] if project_summary_total else float(filtered['horas_aplicadas'].sum())
-        total_departments = project_summary_total['total_departments'] if project_summary_total else int(filtered['departamento'].nunique())
-        total_employees = project_summary_total['total_employees'] if project_summary_total else int(filtered['empleado'].nunique())
-
-        if general_departamento_selected == 'Todos' and general_empleado_selected == 'Todos' and project_summary_filtered is not None:
-            filtered_cost = project_summary_filtered['total_cost']
-            filtered_hours = project_summary_filtered['total_hours']
-            filtered_departments = project_summary_filtered['total_departments']
-            filtered_employees = project_summary_filtered['total_employees']
-        else:
-            filtered_cost = float(general_filtered_view['cantidad'].sum())
-            filtered_hours = float(general_filtered_view['horas_aplicadas'].sum())
-            filtered_departments = int(general_filtered_view['departamento'].nunique())
-            filtered_employees = int(general_filtered_view['empleado'].nunique())
-
-        pct_cost = filtered_cost / total_cost * 100 if total_cost else 0
-        pct_hours = filtered_hours / total_hours * 100 if total_hours else 0
-        pct_departments = filtered_departments / total_departments * 100 if total_departments else 0
-        pct_employees = filtered_employees / total_employees * 100 if total_employees else 0
+        project_summary_total = project_summary_total or project_summary or {}
+        project_summary_filtered = project_summary_filtered or project_summary_total
+        total_project_cost = float(project_summary_total.get('total_cost', filtered['cantidad'].sum()))
+        total_project_hours = float(project_summary_total.get('total_hours', filtered['horas_aplicadas'].sum()))
+        total_project_departments = int(project_summary_total.get('total_departments', filtered['departamento'].nunique()))
+        total_project_employees = int(project_summary_total.get('total_employees', filtered['empleado'].nunique()))
+        has_general_filter = general_departamento_selected != 'Todos' or general_empleado_selected != 'Todos'
+        selected_cost = float(general_filtered_view['cantidad'].sum()) if has_general_filter else float(project_summary_filtered.get('total_cost', filtered['cantidad'].sum()))
+        selected_hours = float(general_filtered_view['horas_aplicadas'].sum()) if has_general_filter else float(project_summary_filtered.get('total_hours', filtered['horas_aplicadas'].sum()))
+        selected_departments = int(general_filtered_view['departamento'].nunique()) if has_general_filter else int(project_summary_filtered.get('total_departments', filtered['departamento'].nunique()))
+        selected_employees = int(general_filtered_view['empleado'].nunique()) if has_general_filter else int(project_summary_filtered.get('total_employees', filtered['empleado'].nunique()))
 
         k1, k2, k3, k4 = st.columns(4)
         with k1:
-            build_metric_card('Coste filtro / proyecto (€)', f"{format_number(filtered_cost, 2)} / {format_number(total_cost, 2)}")
+            build_metric_card('Coste filtro / proyecto (€)', build_value_with_pct(selected_cost, total_project_cost, 2))
         with k2:
-            build_metric_card('Horas filtro / proyecto', f"{format_number(filtered_hours, 2)} / {format_number(total_hours, 2)}")
+            build_metric_card('Horas filtro / proyecto', build_value_with_pct(selected_hours, total_project_hours, 2))
         with k3:
-            build_metric_card('Departamentos filtro / proyecto', f"{format_number(filtered_departments, 0)} / {format_number(total_departments, 0)}")
+            build_metric_card('Departamentos filtro / proyecto', build_value_with_pct(selected_departments, total_project_departments, 0))
         with k4:
-            build_metric_card('Empleados filtro / proyecto', f"{format_number(filtered_employees, 0)} / {format_number(total_employees, 0)}")
-
-        p1, p2, p3, p4 = st.columns(4)
-        with p1:
-            st.markdown(f"<div class='indra-filter-percent'>% coste filtrado: <b>{format_number(pct_cost, 2)}%</b></div>", unsafe_allow_html=True)
-        with p2:
-            st.markdown(f"<div class='indra-filter-percent'>% horas filtradas: <b>{format_number(pct_hours, 2)}%</b></div>", unsafe_allow_html=True)
-        with p3:
-            st.markdown(f"<div class='indra-filter-percent'>% departamentos filtrados: <b>{format_number(pct_departments, 2)}%</b></div>", unsafe_allow_html=True)
-        with p4:
-            st.markdown(f"<div class='indra-filter-percent'>% empleados filtrados: <b>{format_number(pct_employees, 2)}%</b></div>", unsafe_allow_html=True)
+            build_metric_card('Empleados filtro / proyecto', build_value_with_pct(selected_employees, total_project_employees, 0))
 
         monthly_hours = self.aggregate_monthly_entity(filtered, 'horas_aplicadas', general_departamento_selected, general_empleado_selected)
         monthly_amount = self.aggregate_monthly_entity(filtered, 'cantidad', general_departamento_selected, general_empleado_selected)

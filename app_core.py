@@ -13,6 +13,7 @@ from modules.almacenaje import AlmacenajeModule
 from modules.global_filters import apply_global_filters, render_global_sidebar_filters
 
 
+
 def sum_numeric_column(df, column: str) -> float:
     if df is None or df.empty or column not in df.columns:
         return 0.0
@@ -155,17 +156,17 @@ def run_app() -> None:
     if st.session_state.ppt_bytes is not None:
         st.download_button('Descargar PowerPoint generado', data=st.session_state.ppt_bytes, file_name='Informe_Costes_Proyecto_Indra.pptx', mime='application/vnd.openxmlformats-officedocument.presentationml.presentation', use_container_width=True)
 
-    
+    project_summary = build_project_summary(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        build_metric_card('Coste total', dedicaciones_module.format_number(filtered['cantidad'].sum(), 2))
+        build_metric_card('Coste total', dedicaciones_module.format_number(project_summary_total['total_cost'], 2))
     with k2:
-        build_metric_card('Horas totales', dedicaciones_module.format_number(filtered['horas_aplicadas'].sum(), 2))
+        build_metric_card('Horas totales', dedicaciones_module.format_number(project_summary_total['total_hours'], 2))
     with k3:
-        build_metric_card('Departamentos', dedicaciones_module.format_number(filtered['departamento'].nunique(), 0))
+        build_metric_card('Departamentos', dedicaciones_module.format_number(project_summary_total['total_departments'], 0))
     with k4:
-        build_metric_card('Empleados', dedicaciones_module.format_number(filtered['empleado'].nunique(), 0))
+        build_metric_card('Empleados', dedicaciones_module.format_number(project_summary_total['total_employees'], 0))
 
     st.markdown('---')
 
