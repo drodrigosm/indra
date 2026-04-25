@@ -1,6 +1,7 @@
 # Este fichero orquesta la aplicación Streamlit de costes, carga los ficheros de entrada y delega el render en los módulos funcionales.
 import streamlit as st
 from pathlib import Path
+import pandas as pd
 
 from data_common import save_uploaded_file_to_temp
 from modules.dedicaciones import DedicacionesModule
@@ -9,7 +10,32 @@ from ui_common import build_metric_card, inject_custom_theme, render_indra_brand
 from modules.compras_gpi import ComprasGpiModule
 from modules.compras_no_gpi import ComprasNoGpiModule
 from modules.almacenaje import AlmacenajeModule
+from modules.global_filters import apply_global_filters, render_global_sidebar_filters
 
+
+def sum_numeric_column(df, column: str) -> float:
+    if df is None or df.empty or column not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[column], errors='coerce').fillna(0).sum())
+
+
+def count_unique_text_values(dataframes: list, column: str) -> int:
+    values = set()
+    for item_df in dataframes:
+        if item_df is None or item_df.empty or column not in item_df.columns:
+            continue
+        series = item_df[column].dropna().astype(str).str.strip()
+        values.update([value for value in series.tolist() if value])
+    return len(values)
+
+
+def build_project_summary(dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df) -> dict:
+    cost_dataframes = [dedicaciones_df, compras_gpi_df, compras_no_gpi_df, almacenaje_df]
+    total_cost = sum([sum_numeric_column(item_df, 'cantidad') for item_df in cost_dataframes])
+    total_hours = sum([sum_numeric_column(item_df, 'horas_aplicadas') for item_df in cost_dataframes])
+    total_departments = count_unique_text_values(cost_dataframes, 'departamento')
+    total_employees = count_unique_text_values(cost_dataframes, 'empleado')
+    return {'total_cost': total_cost, 'total_hours': total_hours, 'total_departments': total_departments, 'total_employees': total_employees}
 
 def run_app() -> None:
     st.set_page_config(page_title='Informe de Costes del Proyecto', layout='wide')
@@ -48,7 +74,7 @@ def run_app() -> None:
         st.error(f'No se ha podido procesar el fichero: {exc}')
         st.stop()
 
-    filtered = dedicaciones_module.render_global_filters(df)
+    filtered = df.copy()
 
     edt_df = None
     if uploaded_edt_file is not None:
@@ -96,6 +122,16 @@ def run_app() -> None:
             almacenaje_enabled = False
 
     script_dir = Path(__file__).resolve().parent
+    project_summary_total = build_project_summary(df, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
+    global_filters = render_global_sidebar_filters([df, compras_gpi_df, compras_no_gpi_df, almacenaje_df])
+    filtered = apply_global_filters(df, global_filters)
+    compras_gpi_df = apply_global_filters(compras_gpi_df, global_filters)
+    compras_no_gpi_df = apply_global_filters(compras_no_gpi_df, global_filters)
+    almacenaje_df = apply_global_filters(almacenaje_df, global_filters)
+    compras_gpi_enabled = compras_gpi_df is not None and not compras_gpi_df.empty
+    compras_no_gpi_enabled = compras_no_gpi_df is not None and not compras_no_gpi_df.empty
+    almacenaje_enabled = almacenaje_df is not None and not almacenaje_df.empty
+    project_summary_filtered = build_project_summary(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
     template_ppt_path = script_dir / 'template.pptx'
 
     st.markdown('### Exportación PowerPoint')
@@ -115,8 +151,11 @@ def run_app() -> None:
             with st.spinner('Preparando PowerPoint...'):
                 st.session_state.ppt_bytes = build_committee_presentation(filtered, str(template_ppt_path), report_title='Informe de Costes del Proyecto', document_name='Informe de Costes del Proyecto')
 
+    
     if st.session_state.ppt_bytes is not None:
         st.download_button('Descargar PowerPoint generado', data=st.session_state.ppt_bytes, file_name='Informe_Costes_Proyecto_Indra.pptx', mime='application/vnd.openxmlformats-officedocument.presentationml.presentation', use_container_width=True)
+
+    
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -141,7 +180,7 @@ def run_app() -> None:
     tabs = st.tabs(tab_names)
 
     with tabs[0]:
-        dedicaciones_module.render_tab_general(filtered)
+        dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered)
     with tabs[1]:
         dedicaciones_module.render_tab_departamento_horas(filtered)
     with tabs[2]:

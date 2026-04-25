@@ -78,7 +78,17 @@ def inject_custom_theme() -> None:
         "[data-testid='stFileUploaderDropzone'] small { display: none !important; }"
         "[data-testid='stFileUploaderFile'] { padding: 4px 8px !important; margin-top: 4px !important; }"
         "[data-testid='stFileUploaderFile'] div { font-size: 0.78rem !important; }"
-        "</style>"
+        "[data-testid='stSidebar'] { background-color: #F4F5F2 !important; }"
+        ".indra-sidebar-section-title { margin-top: 28px; margin-bottom: 14px; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.04em; color: #5E737A !important; text-transform: uppercase; }"
+        "[data-testid='stSidebar'] details { border: 0 !important; background: transparent !important; box-shadow: none !important; margin-bottom: 8px !important; }"
+        "[data-testid='stSidebar'] details summary { min-height: 42px !important; padding: 8px 2px !important; border-radius: 10px !important; color: #5E737A !important; font-weight: 700 !important; }"
+        "[data-testid='stSidebar'] details summary:hover { background: rgba(0,176,189,0.08) !important; }"
+        "[data-testid='stSidebar'] details summary p { color: #5E737A !important; font-weight: 700 !important; }"
+        "[data-testid='stSidebar'] details[open] summary { color: #004254 !important; }"
+        "[data-testid='stSidebar'] details[open] summary p { color: #004254 !important; }"
+        "[data-testid='stSidebar'] .stButton button[kind='secondary'] { min-height: 46px !important; background-color: #E9ECE8 !important; color: #004254 !important; border: 0 !important; border-radius: 10px !important; font-weight: 800 !important; }"
+        ".indra-sidebar-reset-text { margin-top: -8px; padding: 0 0 8px 16px; color: #0097A7 !important; font-size: 0.86rem; font-weight: 700; }"
+                "</style>"
     )
     st.markdown(css, unsafe_allow_html=True)
 
@@ -104,76 +114,3 @@ def render_indra_branding() -> None:
     main_logo = get_indra_logo_svg('#E3E2DA')
     st.sidebar.markdown(f"<div style='display:flex;justify-content:center;align-items:center;width:100%;padding:14px 10px 20px 10px;box-sizing:border-box;'><div style='width:75%;max-width:240px;line-height:0;'>{sidebar_logo}</div></div>", unsafe_allow_html=True)
     st.markdown(f"<div style='display:flex;justify-content:center;align-items:center;width:100%;padding:8px 0 18px 0;box-sizing:border-box;'><div style='width:75%;max-width:360px;line-height:0;'>{main_logo}</div></div>", unsafe_allow_html=True)
-
-
-def render_checkbox_filter(container, label: str, options: list, state_prefix: str, search_placeholder: str = 'Buscar...') -> list:
-    init_key = f'{state_prefix}_initialized'
-    if init_key not in st.session_state:
-        for idx, option in enumerate(options):
-            st.session_state[f'{state_prefix}_chk_{idx}'] = True
-        st.session_state[init_key] = True
-
-    container.markdown(f'**{label}**')
-    search_value = container.text_input(f'Buscar en {label}', value=st.session_state.get(f'{state_prefix}_search', ''), key=f'{state_prefix}_search', placeholder=search_placeholder, label_visibility='collapsed')
-    col1, col2 = container.columns(2)
-
-    if col1.button('Mostrar todo', key=f'{state_prefix}_all', use_container_width=True):
-        for idx, _ in enumerate(options):
-            st.session_state[f'{state_prefix}_chk_{idx}'] = True
-        st.rerun()
-
-    if col2.button('Quitar todo', key=f'{state_prefix}_none', use_container_width=True):
-        for idx, _ in enumerate(options):
-            st.session_state[f'{state_prefix}_chk_{idx}'] = False
-        st.rerun()
-
-    search_value_norm = search_value.strip().lower()
-    selected = []
-
-    for idx, option in enumerate(options):
-        option_text = str(option).strip()
-        if not option_text:
-            continue
-        if search_value_norm and search_value_norm not in option_text.lower():
-            continue
-        row_col_1, row_col_2 = container.columns([1, 8])
-        checked = row_col_1.checkbox(f'select_{state_prefix}_{idx}', key=f'{state_prefix}_chk_{idx}', label_visibility='collapsed')
-        row_col_2.markdown(f"<div style='color:#004254;font-size:14px;line-height:1.6;padding-top:2px;word-break:break-word;'>{option_text}</div>", unsafe_allow_html=True)
-        if checked:
-            selected.append(option)
-
-    return selected
-
-
-def render_category_chip_filter(container, label: str, options: list, state_key: str) -> list:
-    init_key = f'{state_key}_initialized'
-    if init_key not in st.session_state:
-        for idx, option in enumerate(options):
-            st.session_state[f'{state_key}_chk_{idx}'] = True
-        st.session_state[init_key] = True
-
-    container.markdown(f'**{label}**')
-    col1, col2 = container.columns(2)
-
-    if col1.button('Mostrar todo', key=f'{state_key}_all', use_container_width=True):
-        for idx, _ in enumerate(options):
-            st.session_state[f'{state_key}_chk_{idx}'] = True
-        st.rerun()
-
-    if col2.button('Quitar todo', key=f'{state_key}_none', use_container_width=True):
-        for idx, _ in enumerate(options):
-            st.session_state[f'{state_key}_chk_{idx}'] = False
-        st.rerun()
-
-    selected = []
-    for idx, option in enumerate(options):
-        option_text = str(option).strip()
-        if not option_text:
-            continue
-        row_col_1, row_col_2 = container.columns([1, 8])
-        checked = row_col_1.checkbox(f'cat_{state_key}_{idx}', key=f'{state_key}_chk_{idx}', label_visibility='collapsed')
-        row_col_2.markdown(f"<div style='color:#004254;font-size:14px;line-height:1.6;padding-top:2px;word-break:break-word;'>{option_text}</div>", unsafe_allow_html=True)
-        if checked:
-            selected.append(option)
-
-    return selected

@@ -6,7 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from data_common import normalize_text_key, try_convert_xls_to_xlsx
-from ui_common import DISPLAY_COLUMNS, PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_category_chip_filter, render_checkbox_filter
+from ui_common import DISPLAY_COLUMNS, PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number
 
 
 class DedicacionesModule:
@@ -269,115 +269,10 @@ class DedicacionesModule:
         st.dataframe(detail, use_container_width=True, hide_index=True)
 
     def render_global_filters(self, df: pd.DataFrame) -> pd.DataFrame:
-        sidebar = st.sidebar
-        sidebar.header('Filtros globales')
+        return df.copy()
 
-        periodos = sorted([p for p in df['periodo'].dropna().unique().tolist() if str(p).strip()])
-        elementos = sorted([e for e in df['elemento'].dropna().unique().tolist() if str(e).strip()])
-        departamentos = sorted([d for d in df['departamento'].dropna().unique().tolist() if str(d).strip()])
-        empleados = sorted([e for e in df['empleado'].dropna().unique().tolist() if str(e).strip()])
-        categorias = sorted([c for c in df['categoria_nombre'].dropna().unique().tolist() if str(c).strip()])
-        cantidad_min_df = float(df['cantidad'].min()) if not df.empty else 0.0
-        cantidad_max_df = float(df['cantidad'].max()) if not df.empty else 0.0
-
-        if 'filtro_empleado_global' not in st.session_state:
-            st.session_state.filtro_empleado_global = 'Todos'
-        if 'filtro_elementos_global' not in st.session_state:
-            st.session_state.filtro_elementos_global = elementos.copy()
-        if 'filtro_categorias_global' not in st.session_state:
-            st.session_state.filtro_categorias_global = categorias.copy()
-        if 'filtro_cantidad_global' not in st.session_state:
-            st.session_state.filtro_cantidad_global = (cantidad_min_df, cantidad_max_df)
-        if 'filtro_solo_activos' not in st.session_state:
-            st.session_state.filtro_solo_activos = True
-
-        top1, top2 = sidebar.columns(2)
-
-        if top1.button('Restaurar todo', key='global_restore_all', use_container_width=True):
-            st.session_state.filtro_empleado_global = 'Todos'
-            st.session_state.filtro_elementos_global = elementos.copy()
-            st.session_state.filtro_categorias_global = categorias.copy()
-            st.session_state.filtro_cantidad_global = (cantidad_min_df, cantidad_max_df)
-            st.session_state.filtro_solo_activos = True
-            for idx, _ in enumerate(periodos):
-                st.session_state[f'periodo_global_chk_{idx}'] = True
-            for idx, _ in enumerate(departamentos):
-                st.session_state[f'departamento_global_chk_{idx}'] = True
-            st.rerun()
-
-        if top2.button('Limpiar todo', key='global_clear_all', use_container_width=True):
-            st.session_state.filtro_empleado_global = 'Todos'
-            st.session_state.filtro_elementos_global = []
-            st.session_state.filtro_categorias_global = []
-            st.session_state.filtro_cantidad_global = (cantidad_min_df, cantidad_max_df)
-            st.session_state.filtro_solo_activos = False
-            for idx, _ in enumerate(periodos):
-                st.session_state[f'periodo_global_chk_{idx}'] = False
-            for idx, _ in enumerate(departamentos):
-                st.session_state[f'departamento_global_chk_{idx}'] = False
-            st.rerun()
-
-        selected_periodos = render_checkbox_filter(sidebar, 'Fecha / Periodo', periodos, 'periodo_global', 'Buscar periodo...')
-        selected_departamentos = render_checkbox_filter(sidebar, 'Departamento', departamentos, 'departamento_global', 'Buscar departamento...')
-
-        sidebar.markdown('**Empleado**')
-        empleado_options = ['Todos'] + empleados
-        empleado_index = empleado_options.index(st.session_state.filtro_empleado_global) if st.session_state.filtro_empleado_global in empleado_options else 0
-        st.session_state.filtro_empleado_global = sidebar.selectbox('Empleado', options=empleado_options, index=empleado_index, key='selectbox_empleado_global', label_visibility='collapsed')
-
-        sidebar.markdown('**Elemento**')
-        col_el_1, col_el_2 = sidebar.columns(2)
-
-        if col_el_1.button('Mostrar todo', key='elementos_all', use_container_width=True):
-            st.session_state.filtro_elementos_global = elementos.copy()
-            st.rerun()
-
-        if col_el_2.button('Quitar todo', key='elementos_none', use_container_width=True):
-            st.session_state.filtro_elementos_global = []
-            st.rerun()
-
-        st.session_state.filtro_elementos_global = sidebar.multiselect('Elemento', options=elementos, default=st.session_state.filtro_elementos_global, key='multiselect_elementos_global', label_visibility='collapsed')
-        st.session_state.filtro_categorias_global = render_category_chip_filter(sidebar, 'Categoría', categorias, 'filtro_categorias_global')
-        sidebar.markdown('**Cantidad**')
-        st.session_state.filtro_cantidad_global = sidebar.slider('Cantidad', min_value=float(cantidad_min_df), max_value=float(cantidad_max_df), value=st.session_state.filtro_cantidad_global, step=1.0, label_visibility='collapsed')
-        st.session_state.filtro_solo_activos = sidebar.checkbox('Solo estado Activo', value=st.session_state.filtro_solo_activos, key='checkbox_solo_activos_global')
-
-        filtered = df.copy()
-
-        if selected_periodos:
-            filtered = filtered[filtered['periodo'].isin(selected_periodos)]
-        else:
-            filtered = filtered.iloc[0:0]
-
-        if st.session_state.filtro_elementos_global:
-            filtered = filtered[filtered['elemento'].isin(st.session_state.filtro_elementos_global)]
-        else:
-            filtered = filtered.iloc[0:0]
-
-        if selected_departamentos:
-            filtered = filtered[filtered['departamento'].isin(selected_departamentos)]
-        else:
-            filtered = filtered.iloc[0:0]
-
-        if st.session_state.filtro_empleado_global != 'Todos':
-            filtered = filtered[filtered['empleado'] == st.session_state.filtro_empleado_global]
-
-        if st.session_state.filtro_categorias_global:
-            filtered = filtered[filtered['categoria_nombre'].isin(st.session_state.filtro_categorias_global)]
-        else:
-            filtered = filtered.iloc[0:0]
-
-        cantidad_min_sel, cantidad_max_sel = st.session_state.filtro_cantidad_global
-        filtered = filtered[(filtered['cantidad'] >= cantidad_min_sel) & (filtered['cantidad'] <= cantidad_max_sel)]
-
-        if st.session_state.filtro_solo_activos:
-            filtered = filtered[filtered['estado'].astype('string').str.upper() == 'ACTIVO'].copy()
-
-        return filtered
-
-    def render_tab_general(self, filtered: pd.DataFrame) -> None:
+    def render_tab_general(self, filtered: pd.DataFrame, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None) -> None:
         st.subheader('Sección General · Evolución anual por departamento y empleado')
-
         general_departamentos = ['Todos'] + sorted([v for v in filtered['departamento'].dropna().unique().tolist() if str(v).strip()])
         general_empleados = ['Todos'] + sorted([v for v in filtered['empleado'].dropna().unique().tolist() if str(v).strip()])
 
@@ -396,13 +291,46 @@ class DedicacionesModule:
         else:
             general_filtered_view = filtered.copy()
 
-        k1, k2, k3 = st.columns(3)
+        total_cost = project_summary_total['total_cost'] if project_summary_total else float(filtered['cantidad'].sum())
+        total_hours = project_summary_total['total_hours'] if project_summary_total else float(filtered['horas_aplicadas'].sum())
+        total_departments = project_summary_total['total_departments'] if project_summary_total else int(filtered['departamento'].nunique())
+        total_employees = project_summary_total['total_employees'] if project_summary_total else int(filtered['empleado'].nunique())
+
+        if general_departamento_selected == 'Todos' and general_empleado_selected == 'Todos' and project_summary_filtered is not None:
+            filtered_cost = project_summary_filtered['total_cost']
+            filtered_hours = project_summary_filtered['total_hours']
+            filtered_departments = project_summary_filtered['total_departments']
+            filtered_employees = project_summary_filtered['total_employees']
+        else:
+            filtered_cost = float(general_filtered_view['cantidad'].sum())
+            filtered_hours = float(general_filtered_view['horas_aplicadas'].sum())
+            filtered_departments = int(general_filtered_view['departamento'].nunique())
+            filtered_employees = int(general_filtered_view['empleado'].nunique())
+
+        pct_cost = filtered_cost / total_cost * 100 if total_cost else 0
+        pct_hours = filtered_hours / total_hours * 100 if total_hours else 0
+        pct_departments = filtered_departments / total_departments * 100 if total_departments else 0
+        pct_employees = filtered_employees / total_employees * 100 if total_employees else 0
+
+        k1, k2, k3, k4 = st.columns(4)
         with k1:
-            build_metric_card('Registros analizados', format_number(len(general_filtered_view), 0))
+            build_metric_card('Coste filtro / proyecto (€)', f"{format_number(filtered_cost, 2)} / {format_number(total_cost, 2)}")
         with k2:
-            build_metric_card('Horas totales', format_number(general_filtered_view['horas_aplicadas'].sum(), 2))
+            build_metric_card('Horas filtro / proyecto', f"{format_number(filtered_hours, 2)} / {format_number(total_hours, 2)}")
         with k3:
-            build_metric_card('Cantidad total (€)', format_number(general_filtered_view['cantidad'].sum(), 2))
+            build_metric_card('Departamentos filtro / proyecto', f"{format_number(filtered_departments, 0)} / {format_number(total_departments, 0)}")
+        with k4:
+            build_metric_card('Empleados filtro / proyecto', f"{format_number(filtered_employees, 0)} / {format_number(total_employees, 0)}")
+
+        p1, p2, p3, p4 = st.columns(4)
+        with p1:
+            st.markdown(f"<div class='indra-filter-percent'>% coste filtrado: <b>{format_number(pct_cost, 2)}%</b></div>", unsafe_allow_html=True)
+        with p2:
+            st.markdown(f"<div class='indra-filter-percent'>% horas filtradas: <b>{format_number(pct_hours, 2)}%</b></div>", unsafe_allow_html=True)
+        with p3:
+            st.markdown(f"<div class='indra-filter-percent'>% departamentos filtrados: <b>{format_number(pct_departments, 2)}%</b></div>", unsafe_allow_html=True)
+        with p4:
+            st.markdown(f"<div class='indra-filter-percent'>% empleados filtrados: <b>{format_number(pct_employees, 2)}%</b></div>", unsafe_allow_html=True)
 
         monthly_hours = self.aggregate_monthly_entity(filtered, 'horas_aplicadas', general_departamento_selected, general_empleado_selected)
         monthly_amount = self.aggregate_monthly_entity(filtered, 'cantidad', general_departamento_selected, general_empleado_selected)
