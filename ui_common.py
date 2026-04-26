@@ -27,6 +27,13 @@ DISPLAY_COLUMNS = {
     'tipo_coste_nombre': 'Tipo de Coste'
 }
 
+def render_corporate_dataframe(df, use_container_width: bool = True, hide_index: bool = True, height: int | str | None = None) -> None:
+    if df is None or df.empty:
+        st.info('No hay datos para mostrar.')
+        return
+    table_html = df.to_html(index=not hide_index, escape=False, classes='indra-corporate-table')
+    max_height_style = f"max-height:{height}px;overflow:auto;" if isinstance(height, int) else "overflow:auto;"
+    st.markdown(f"<div class='indra-corporate-table-wrapper' style='{max_height_style}'>{table_html}</div>", unsafe_allow_html=True)
 
 def format_number(value: float, decimals: int = 2) -> str:
     return f"{value:,.{decimals}f}".replace(',', 'X').replace('.', ',').replace('X', '.')
@@ -87,7 +94,31 @@ def inject_custom_theme() -> None:
         "[data-testid='stSidebar'] details[open] summary { color: #004254 !important; }"
         "[data-testid='stSidebar'] details[open] summary p { color: #004254 !important; }"
         "[data-testid='stSidebar'] .stButton button[kind='secondary'] { min-height: 46px !important; background-color: #E9ECE8 !important; color: #004254 !important; border: 0 !important; border-radius: 10px !important; font-weight: 800 !important; }"
+        ".indra-navigation-title { margin-top: 22px !important; padding-top: 14px !important; border-top: 1px solid rgba(0,66,84,0.12) !important; }"
+        "[data-testid='stSidebar'] .stRadio > div { gap: 6px !important; }"
+        "[data-testid='stSidebar'] .stRadio label { background: transparent !important; border-radius: 8px !important; padding: 8px 10px !important; margin: 2px 0 !important; font-weight: 700 !important; }"
+        "[data-testid='stSidebar'] .stRadio label:hover { background: rgba(0,176,189,0.12) !important; }"
+        "[data-testid='stSidebar'] .stRadio label:has(input:checked) { background: #00B0BD !important; color: #FFFFFF !important; }"
+        "[data-testid='stSidebar'] .stRadio label:has(input:checked) * { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }"
+        "[data-testid='stSidebar'] .stRadio input { display: none !important; }"
         ".indra-sidebar-reset-text { margin-top: -8px; padding: 0 0 8px 16px; color: #0097A7 !important; font-size: 0.86rem; font-weight: 700; }"
+        
+        "[data-testid='stDataFrame'] { background-color: #004254 !important; border-radius: 10px !important; overflow: hidden !important; }"
+        "[data-testid='stDataFrame'] table { background-color: #004254 !important; color: #E3E2DA !important; }"
+        "[data-testid='stDataFrame'] thead tr th { background-color: #0B5A6A !important; color: #E3E2DA !important; font-weight: 600 !important; border-bottom: 1px solid rgba(227,226,218,0.2) !important; }"
+        "[data-testid='stDataFrame'] tbody tr { background-color: #004254 !important; }"
+        "[data-testid='stDataFrame'] tbody tr:nth-child(even) { background-color: #0A4F5C !important; }"
+        "[data-testid='stDataFrame'] tbody tr:hover { background-color: rgba(0,176,189,0.25) !important; }"
+        "[data-testid='stDataFrame'] td { color: #E3E2DA !important; border-bottom: 1px solid rgba(227,226,218,0.1) !important; }"
+        "[data-testid='stDataFrame'] th, [data-testid='stDataFrame'] td { padding: 8px 10px !important; }"
+        ".indra-corporate-table-wrapper { width: 100% !important; border: 1px solid rgba(227,226,218,0.22) !important; border-radius: 8px !important; overflow: auto !important; background: #004254 !important; }"
+        ".indra-corporate-table { width: 100% !important; border-collapse: collapse !important; background: #004254 !important; color: #E3E2DA !important; font-size: 0.88rem !important; }"
+        ".indra-corporate-table thead th { background: #0B5A6A !important; color: #E3E2DA !important; font-weight: 700 !important; text-align: left !important; padding: 9px 10px !important; border: 1px solid rgba(227,226,218,0.18) !important; }"
+        ".indra-corporate-table tbody td { background: #004254 !important; color: #E3E2DA !important; padding: 8px 10px !important; border: 1px solid rgba(227,226,218,0.14) !important; }"
+        ".indra-corporate-table tbody tr:nth-child(even) td { background: #063F4D !important; }"
+        ".indra-corporate-table tbody tr:hover td { background: rgba(0,176,189,0.22) !important; }"
+        ".indra-corporate-table th:last-child, .indra-corporate-table td:last-child { text-align: right !important; }"
+        
                 "</style>"
     )
     st.markdown(css, unsafe_allow_html=True)

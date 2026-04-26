@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from data_common import try_convert_xls_to_xlsx
-from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number
+from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_corporate_dataframe
 
 
 class ComprasNoGpiModule:
@@ -243,4 +243,4 @@ class ComprasNoGpiModule:
         detail = filtered[detail_cols].copy()
         detail = detail.rename(columns={'periodo': 'Periodo', 'departamento': 'Elemento / Departamento', 'categoria': 'Categoría', 'proveedor': 'Proveedor', 'clase_documento': 'Clase documento compras', 'orden_compra_numero': 'Orden compra', 'orden_compra_linea': 'Línea', 'articulo': 'Artículo', 'factura': 'Factura', 'f_proveedor': 'Factura proveedor', 'cantidad': 'Importe (€)'})
         detail = detail.sort_values(['Periodo', 'Proveedor', 'Elemento / Departamento'])
-        st.dataframe(detail, use_container_width=True, hide_index=True)
+        render_corporate_dataframe(detail, use_container_width=True, hide_index=True)

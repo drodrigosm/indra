@@ -6,7 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from data_common import normalize_text_key, try_convert_xls_to_xlsx
-from ui_common import DISPLAY_COLUMNS, PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number
+from ui_common import DISPLAY_COLUMNS, PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_corporate_dataframe
 
 
 class DedicacionesModule:
@@ -231,7 +231,7 @@ class DedicacionesModule:
                 st.markdown('**Departamentos sin gasto estimado en EDT:** ninguno')
 
             detail = comparison_df.rename(columns={'departamento': 'Departamento', 'incurrido': 'Incurrido (€)', 'estimado_rc': 'Estimado RC (€)', 'desviacion': 'Desviación (€)'})
-            st.dataframe(detail, use_container_width=True, hide_index=True)
+            render_corporate_dataframe(detail, use_container_width=True, hide_index=True)
             return
 
         st.markdown('')
@@ -239,7 +239,7 @@ class DedicacionesModule:
         timeline = self.aggregate_timeline(df, dimension, metric)
         self.plot_timeline(timeline, dimension, metric, f'{section_title} - evolución mensual')
         detail = aggregated.rename(columns={dimension: DISPLAY_COLUMNS['departamento'] if dimension == 'departamento' else DISPLAY_COLUMNS['empleado'], 'horas_aplicadas': DISPLAY_COLUMNS['horas_aplicadas'], 'cantidad': DISPLAY_COLUMNS['cantidad'], 'empleados': 'Nº empleados', 'departamentos': 'Nº departamentos'})
-        st.dataframe(detail, use_container_width=True, hide_index=True)
+        render_corporate_dataframe(detail, use_container_width=True, hide_index=True)
 
     def render_filtered_section(self, df: pd.DataFrame, filter_col: str, dimension_col: str, metric: str, title: str) -> None:
         options = ['Todos'] + sorted([v for v in df[filter_col].dropna().unique().tolist() if str(v).strip()])
@@ -266,7 +266,7 @@ class DedicacionesModule:
         detail = filtered_df[detail_cols].copy()
         detail = detail.rename(columns={'periodo': 'Periodo', 'departamento': 'Departamento', 'empleado': 'Empleado', 'categoria_nombre': 'Categoría', 'horas_aplicadas': 'Horas Aplicadas', 'tasa': 'Tasa', 'cantidad': 'Cantidad', 'tipo_coste_nombre': 'Tipo de Coste'})
         detail = detail.sort_values(['Periodo', 'Departamento', 'Empleado'])
-        st.dataframe(detail, use_container_width=True, hide_index=True)
+        render_corporate_dataframe(detail, use_container_width=True, hide_index=True)
 
     def render_global_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()

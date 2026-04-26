@@ -1,0 +1,2 @@
+pyinstaller --onedir --name Costes_Indra --icon "C:\repositorios\INDRA\icono_indra.ico" --version-file version_info.txt --collect-all streamlit --collect-all altair --collect-all pydeck --collect-all pptx --copy-metadata streamlit --copy-metadata python-pptx --add-data "Costes.py;." --add-data "app_core.py;." --add-data "ui_common.py;." --add-data "data_common.py;." --add-data "version.py;." --add-data "modules;modules" --add-data "ppt;ppt" --add-data "template.pptx;." launcher.py
+Abrir el fichero .iss con INNO STUP y crear el installer

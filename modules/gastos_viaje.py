@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from data_common import try_convert_xls_to_xlsx
-from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number
+from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_corporate_dataframe
 
 
 class GastosViajeModule:
@@ -221,4 +221,4 @@ class GastosViajeModule:
         st.markdown('### Control de gastos relevantes')
         st.caption(f'El Top 5 de empleados concentra el {format_number(top_5_empleados, 1)} % del gasto filtrado.')
         top_expenses = filtered.sort_values('cantidad', ascending=False).head(25)[['periodo', 'empleado', 'departamento', 'categoria', 'descripcion', 'cantidad', 'fichero_origen']]
-        st.dataframe(top_expenses, use_container_width=True, hide_index=True)
+        render_corporate_dataframe(top_expenses, use_container_width=True, hide_index=True)

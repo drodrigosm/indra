@@ -13,7 +13,51 @@ from modules.almacenaje import AlmacenajeModule
 from modules.global_filters import apply_global_filters, render_global_sidebar_filters
 from modules.gastos_viaje import GastosViajeModule
 
+def build_navigation_sections(compras_gpi_enabled: bool, compras_no_gpi_enabled: bool, almacenaje_enabled: bool, gastos_viaje_enabled: bool) -> list[dict]:
+    sections = [{'key': 'general', 'label': 'General', 'sidebar_label': '1. General', 'icon': '▣'}, {'key': 'departamento_horas', 'label': 'Departamento (hs)', 'sidebar_label': '2. Departamento (hs)', 'icon': '▦'}, {'key': 'empleado_horas', 'label': 'Empleado (hs)', 'sidebar_label': '3. Empleado (hs)', 'icon': '▦'}, {'key': 'departamento_cantidad', 'label': 'Departamento (€)', 'sidebar_label': '4. Departamento (€)', 'icon': '▦'}, {'key': 'empleado_cantidad', 'label': 'Empleado (€)', 'sidebar_label': '5. Empleado (€)', 'icon': '▦'}]
+    if compras_gpi_enabled:
+        sections.append({'key': 'compras_gpi', 'label': 'Compras GPI', 'sidebar_label': f'{len(sections) + 1}. Compras GPI', 'icon': '🛒'})
+    if compras_no_gpi_enabled:
+        sections.append({'key': 'compras_no_gpi', 'label': 'Compras NO GPI', 'sidebar_label': f'{len(sections) + 1}. Compras NO GPI', 'icon': '▤'})
+    if almacenaje_enabled:
+        sections.append({'key': 'almacenaje', 'label': 'Almacenaje', 'sidebar_label': f'{len(sections) + 1}. Almacenaje', 'icon': '▧'})
+    if gastos_viaje_enabled:
+        sections.append({'key': 'gastos_viaje', 'label': 'Gastos Viaje', 'sidebar_label': f'{len(sections) + 1}. Gastos Viaje', 'icon': '✈'})
+    return sections
 
+
+def sync_navigation_from_sidebar() -> None:
+    st.session_state.active_navigation_section = st.session_state.sidebar_navigation_section
+    st.session_state.top_navigation_section = st.session_state.sidebar_navigation_section
+
+
+def sync_navigation_from_top() -> None:
+    st.session_state.active_navigation_section = st.session_state.top_navigation_section
+    st.session_state.sidebar_navigation_section = st.session_state.top_navigation_section
+
+
+def render_navigation(sections: list[dict]) -> str:
+    section_keys = [section['key'] for section in sections]
+    default_key = section_keys[0]
+    if 'active_navigation_section' not in st.session_state or st.session_state.active_navigation_section not in section_keys:
+        st.session_state.active_navigation_section = default_key
+    st.session_state.sidebar_navigation_section = st.session_state.active_navigation_section
+    st.session_state.top_navigation_section = st.session_state.active_navigation_section
+    label_by_key = {section['key']: f"{section['icon']}  {section['sidebar_label']}" for section in sections}
+    top_label_by_key = {section['key']: section['label'] for section in sections}
+    st.sidebar.markdown("<div class='indra-sidebar-section-title indra-navigation-title'>NAVEGACIÓN</div>", unsafe_allow_html=True)
+    st.sidebar.radio('Navegación', options=section_keys, format_func=lambda key: label_by_key[key], key='sidebar_navigation_section', label_visibility='collapsed', on_change=sync_navigation_from_sidebar)
+    st.radio('Secciones', options=section_keys, format_func=lambda key: top_label_by_key[key], key='top_navigation_section', label_visibility='collapsed', horizontal=True, on_change=sync_navigation_from_top)
+    return st.session_state.active_navigation_section
+
+
+def calculate_project_cost(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df=None) -> float:
+    total = sum_numeric_column(filtered, 'cantidad')
+    total += sum_numeric_column(compras_gpi_df, 'cantidad')
+    total += sum_numeric_column(compras_no_gpi_df, 'cantidad')
+    total += sum_numeric_column(almacenaje_df, 'cantidad')
+    total += sum_numeric_column(gastos_viaje_df, 'cantidad')
+    return total
 
 def sum_numeric_column(df, column: str) -> float:
     if df is None or df.empty or column not in df.columns:
@@ -81,6 +125,7 @@ def run_app() -> None:
     with st.expander('Carga de carpeta del proyecto', expanded=True):
         uploaded_project_files = st.file_uploader('Selecciona la carpeta del proyecto', type=['xls', 'xlsx'], accept_multiple_files='directory', key='uploaded_project_folder')
         st.caption('La app detecta automáticamente: Dedicaciones, Compras NO GPI, Compras GPI, Almacenaje y Gastos de Viaje según el nombre del fichero.')
+
     classified_files = classify_uploaded_project_files(uploaded_project_files)
     if classified_files['ignored']:
         st.warning('Ficheros ignorados por no coincidir con ninguna regla: ' + ', '.join(classified_files['ignored']))
@@ -144,7 +189,7 @@ def run_app() -> None:
             st.error(f'No se ha podido procesar el fichero de Almacenaje: {exc}')
             almacenaje_df = None
             almacenaje_enabled = False
-    
+
     gastos_viaje_df = None
     gastos_viaje_enabled = False
     if classified_files['gastos_viaje']:
@@ -177,13 +222,12 @@ def run_app() -> None:
     template_ppt_path = script_dir / 'template.pptx'
 
     st.markdown('### Exportación PowerPoint')
-    
 
     if 'ppt_bytes' not in st.session_state:
         st.session_state.ppt_bytes = None
 
     if st.button('Generar y descargar PowerPoint', use_container_width=True):
-        if filtered.empty:
+        if filtered is None or filtered.empty:
             st.error('No hay datos para generar la presentación.')
             st.session_state.ppt_bytes = None
         elif not template_ppt_path.exists():
@@ -193,11 +237,8 @@ def run_app() -> None:
             with st.spinner('Preparando PowerPoint...'):
                 st.session_state.ppt_bytes = build_committee_presentation(filtered, str(template_ppt_path), report_title='Informe de Costes del Proyecto', document_name='Informe de Costes del Proyecto')
 
-    
     if st.session_state.ppt_bytes is not None:
         st.download_button('Descargar PowerPoint generado', data=st.session_state.ppt_bytes, file_name='Informe_Costes_Proyecto_Indra.pptx', mime='application/vnd.openxmlformats-officedocument.presentationml.presentation', use_container_width=True)
-
-    project_summary = build_project_summary(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df)
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -211,67 +252,25 @@ def run_app() -> None:
 
     st.markdown('---')
 
-    tab_names = ['0. General', '1. Elemento + Departamento (Horas)', '2. Empleado + Nombre (Horas)', '3. Elemento + Departamento (Cantidad)', '4. Empleado + Nombre (Cantidad)']
-    if compras_gpi_enabled:
-        tab_names.append('5. Compras GPI')
-    if compras_no_gpi_enabled:
-        tab_names.append('6. Compras NO GPI')
-    if almacenaje_enabled:
-        tab_names.append('7. Almacenaje')
-    if gastos_viaje_enabled:
-        tab_names.append('8. Gastos Viaje')
+    navigation_sections = build_navigation_sections(compras_gpi_enabled, compras_no_gpi_enabled, almacenaje_enabled, gastos_viaje_enabled)
+    selected_section = render_navigation(navigation_sections)
 
-    tabs = st.tabs(tab_names)
-
-    with tabs[0]:
+    if selected_section == 'general':
         dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered)
-    with tabs[1]:
+    elif selected_section == 'departamento_horas':
         dedicaciones_module.render_tab_departamento_horas(filtered)
-    with tabs[2]:
+    elif selected_section == 'empleado_horas':
         dedicaciones_module.render_tab_empleado_horas(filtered)
-    with tabs[3]:
+    elif selected_section == 'departamento_cantidad':
         dedicaciones_module.render_tab_departamento_cantidad(filtered, edt_df)
-    with tabs[4]:
+    elif selected_section == 'empleado_cantidad':
         dedicaciones_module.render_tab_empleado_cantidad(filtered)
-
-    current_tab_index = 5
-
-    if compras_gpi_enabled:
-        with tabs[current_tab_index]:
-            coste_total_proyecto = float(filtered['cantidad'].sum())
-            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
-                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
-            if almacenaje_enabled and almacenaje_df is not None:
-                coste_total_proyecto += float(almacenaje_df['cantidad'].sum())
-            compras_gpi_module.render_tab(compras_gpi_df, coste_total_proyecto=coste_total_proyecto)
-        current_tab_index += 1
-
-    if compras_no_gpi_enabled:
-        with tabs[current_tab_index]:
-            estimado_total = float(edt_df['estimado_rc'].sum()) if edt_df is not None and not edt_df.empty else None
-            compras_no_gpi_module.render_tab(compras_no_gpi_df, coste_interno_total=float(filtered['cantidad'].sum()), estimado_total=estimado_total)
-        current_tab_index += 1
-
-    if almacenaje_enabled:
-        with tabs[current_tab_index]:
-            coste_total_proyecto = float(filtered['cantidad'].sum())
-            if compras_gpi_enabled and compras_gpi_df is not None:
-                coste_total_proyecto += float(compras_gpi_df['cantidad'].sum())
-            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
-                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
-            if gastos_viaje_enabled and gastos_viaje_df is not None:
-                coste_total_proyecto += float(gastos_viaje_df['cantidad'].sum())
-            almacenaje_module.render_tab(almacenaje_df, coste_total_proyecto=coste_total_proyecto)
-        current_tab_index += 1
-
-    if gastos_viaje_enabled:
-        with tabs[current_tab_index]:
-            coste_total_proyecto = float(filtered['cantidad'].sum())
-            if compras_gpi_enabled and compras_gpi_df is not None:
-                coste_total_proyecto += float(compras_gpi_df['cantidad'].sum())
-            if compras_no_gpi_enabled and compras_no_gpi_df is not None:
-                coste_total_proyecto += float(compras_no_gpi_df['cantidad'].sum())
-            if almacenaje_enabled and almacenaje_df is not None:
-                coste_total_proyecto += float(almacenaje_df['cantidad'].sum())
-            gastos_viaje_module.render_tab(gastos_viaje_df, coste_total_proyecto=coste_total_proyecto)
-        current_tab_index += 1
+    elif selected_section == 'compras_gpi':
+        compras_gpi_module.render_tab(compras_gpi_df, coste_total_proyecto=calculate_project_cost(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df))
+    elif selected_section == 'compras_no_gpi':
+        estimado_total = float(edt_df['estimado_rc'].sum()) if edt_df is not None and not edt_df.empty else None
+        compras_no_gpi_module.render_tab(compras_no_gpi_df, coste_interno_total=sum_numeric_column(filtered, 'cantidad'), estimado_total=estimado_total)
+    elif selected_section == 'almacenaje':
+        almacenaje_module.render_tab(almacenaje_df, coste_total_proyecto=calculate_project_cost(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df))
+    elif selected_section == 'gastos_viaje':
+        gastos_viaje_module.render_tab(gastos_viaje_df, coste_total_proyecto=calculate_project_cost(filtered, compras_gpi_df, compras_no_gpi_df, almacenaje_df, gastos_viaje_df))

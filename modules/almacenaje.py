@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from data_common import try_convert_xls_to_xlsx
-from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number
+from ui_common import PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_corporate_dataframe
 
 
 class AlmacenajeModule:
@@ -269,4 +269,4 @@ class AlmacenajeModule:
         detail = filtered[detail_cols].copy()
         detail = detail.rename(columns={'periodo': 'Periodo', 'unidad_empresa': 'Unidad de Empresa', 'proyecto': 'Proyecto', 'estado': 'Estado', 'departamento': 'Elemento', 'categoria': 'Componente de Coste', 'material': 'Descripción / Material', 'cantidad': 'Importe (€)', 'fichero_origen': 'Fichero origen', 'duplicado_posible': 'Posible duplicado'})
         detail = detail.sort_values(['Periodo', 'Elemento', 'Componente de Coste'])
-        st.dataframe(detail, use_container_width=True, hide_index=True)
+        render_corporate_dataframe(detail, use_container_width=True, hide_index=True)
