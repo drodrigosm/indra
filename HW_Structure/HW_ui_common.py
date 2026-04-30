@@ -1,7 +1,7 @@
 # Componentes visuales comunes de Streamlit reutilizables por los distintos modulos de la aplicacion.
 
 import streamlit as st
-from hw_scanner import get_direct_content
+from HW_scanner import get_direct_content
 
 
 def inject_custom_theme():

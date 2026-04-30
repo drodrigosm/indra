@@ -6,7 +6,7 @@ import pandas as pd
 from data_common import save_uploaded_file_to_temp
 from modules.dedicaciones import DedicacionesModule
 from ppt.dedicaciones_ppt import build_committee_presentation
-from ui_common import build_metric_card, inject_custom_theme, render_indra_branding
+from HW_ui_common import build_metric_card, inject_custom_theme, render_indra_branding
 from modules.compras_gpi import ComprasGpiModule
 from modules.compras_no_gpi import ComprasNoGpiModule
 from modules.almacenaje import AlmacenajeModule
@@ -256,7 +256,7 @@ def run_app() -> None:
     selected_section = render_navigation(navigation_sections)
 
     if selected_section == 'general':
-        dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered)
+        dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered, compras_gpi_df=compras_gpi_df)
     elif selected_section == 'departamento_horas':
         dedicaciones_module.render_tab_departamento_horas(filtered)
     elif selected_section == 'empleado_horas':

@@ -157,6 +157,14 @@ class DedicacionesModule:
         fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title=y_title, margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', categoryorder='array', categoryarray=plot_df['periodo'].tolist(), tickmode='array', tickvals=plot_df['periodo'].tolist(), ticktext=plot_df['periodo'].tolist(), gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)', tickfont=dict(color=PALETTE['texto_claro']), title=dict(font=dict(color=PALETTE['texto_claro']))), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)', tickfont=dict(color=PALETTE['texto_claro']), title=dict(font=dict(color=PALETTE['texto_claro']))), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
+    def plot_general_compras_gpi_monthly_amount(self, df_plot: pd.DataFrame, title: str, key: str) -> None:
+        plot_df = df_plot.copy()
+        plot_df['label_valor'] = plot_df['cantidad'].apply(lambda v: format_number(v, 0))
+        fig = px.bar(plot_df, x='periodo', y='cantidad', title=title, text='label_valor')
+        fig.update_traces(marker_color=PALETTE['turquesa'], textposition='outside', textfont=dict(color=PALETTE['texto_claro'], size=12), cliponaxis=False, hovertemplate='%{x}<br>%{y:,.2f} €<extra></extra>')
+        fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title='Importe (€)', margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
     def plot_bar(self, df_plot: pd.DataFrame, x_col: str, y_col: str, title: str) -> None:
         plot_df = df_plot.copy()
         fig = px.bar(plot_df, x=y_col, y=x_col, orientation='h', text_auto='.2s', title=title, color=x_col, color_discrete_sequence=PLOTLY_COLOR_SEQUENCE)
@@ -268,7 +276,7 @@ class DedicacionesModule:
     def render_global_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
 
-    def render_tab_general(self, filtered: pd.DataFrame, project_summary: dict | None = None, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None) -> None:
+    def render_tab_general(self, filtered: pd.DataFrame, project_summary: dict | None = None, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None, compras_gpi_df: pd.DataFrame | None = None) -> None:
         st.subheader('Sección General · Evolución anual por departamento y empleado')
 
         def build_value_with_pct(selected_value: float, total_value: float, decimals: int = 2) -> str:
@@ -322,16 +330,20 @@ class DedicacionesModule:
         self.plot_general_metric_evolution(monthly_hours, 'horas_aplicadas', 'Evolución mensual · Horas')
         st.markdown('### Evolución anual en cantidad (€)')
         self.plot_general_metric_evolution(monthly_amount, 'cantidad', 'Evolución mensual · Cantidad (€)')
-        st.markdown('### Evolución mensual en horas por departamento')
 
-        departamento_evolution_selected = st.selectbox('Selecciona departamento para evolución en horas', options=general_departamentos, key='departamento_evolution_selected')
-        monthly_department_hours = self.aggregate_monthly_single_selector(filtered, 'departamento', departamento_evolution_selected, 'horas_aplicadas')
-        self.plot_general_metric_evolution(monthly_department_hours, 'horas_aplicadas', f'Evolución mensual en horas · Departamento: {departamento_evolution_selected}')
+        st.markdown('### Evolución mensual de compras GPI')
+        if compras_gpi_df is None:
+            st.info('No se está recibiendo el dataframe de Compras GPI en General. Revisa la llamada desde app_core.py.')
+            return
+        if compras_gpi_df.empty:
+            st.info('Compras GPI está vacío después de aplicar los filtros globales.')
+            return
+        if 'periodo' not in compras_gpi_df.columns or 'cantidad' not in compras_gpi_df.columns:
+            st.info('Compras GPI no contiene las columnas periodo y cantidad necesarias para pintar el gráfico.')
+            return
 
-        st.markdown('### Evolución mensual en horas por empleado')
-        empleado_evolution_selected = st.selectbox('Selecciona empleado para evolución en horas', options=general_empleados, key='empleado_evolution_selected')
-        monthly_employee_hours = self.aggregate_monthly_single_selector(filtered, 'empleado', empleado_evolution_selected, 'horas_aplicadas')
-        self.plot_general_metric_evolution(monthly_employee_hours, 'horas_aplicadas', f'Evolución mensual en horas · Empleado: {empleado_evolution_selected}')
+        monthly_compras_gpi = compras_gpi_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
+        self.plot_general_compras_gpi_monthly_amount(monthly_compras_gpi, 'Evolución mensual · Compras GPI (€)', 'general_compras_gpi_evolucion_mensual')
 
     def render_tab_departamento_horas(self, filtered: pd.DataFrame) -> None:
         st.subheader('Sección 1 · Horas por Elemento / Departamento')

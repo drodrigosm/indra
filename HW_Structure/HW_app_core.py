@@ -2,8 +2,8 @@
 
 from pathlib import Path
 import streamlit as st
-from modules.hw_structure import render_hw_structure
-from ui_common import inject_custom_theme
+from modules.HW_structure import render_hw_structure
+from HW_ui_common import inject_custom_theme
 
 
 def run_app():

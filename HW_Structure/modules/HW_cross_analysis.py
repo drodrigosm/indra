@@ -1,0 +1,1 @@
+# Modulo visual que realiza el analisis cruzado de los datos.

@@ -1,0 +1,1 @@
+# Modulo visual para mostrar las utilidades comunes de la app

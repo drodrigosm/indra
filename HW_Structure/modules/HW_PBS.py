@@ -2,8 +2,8 @@
 
 import pandas as pd
 import streamlit as st
-from hw_scanner import add_missing_main_elements, count_content, format_size, get_children_by_code, get_code_from_name, get_description_from_name, get_descendant_rows_by_code, get_direct_content, get_main_element_row, get_sidebar_main_elements, safe_iterdir, scan_hw_folders
-from ui_common import render_file_table, render_level_summary
+from HW_scanner import add_missing_main_elements, count_content, format_size, get_children_by_code, get_code_from_name, get_description_from_name, get_descendant_rows_by_code, get_direct_content, get_main_element_row, get_sidebar_main_elements, safe_iterdir, scan_hw_folders
+from HW_ui_common import render_file_table, render_level_summary
 
 
 def set_selected_main_element(code):
