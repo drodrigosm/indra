@@ -190,22 +190,6 @@ class ComprasNoGpiModule:
         with k5:
             build_metric_card('Concentración Top 3', f'{format_number(top_3_pct, 1)}%')
 
-        if coste_interno_total is not None:
-            total_proyecto = float(coste_interno_total) + total_importe
-            pct_interno = float(coste_interno_total) / total_proyecto * 100 if total_proyecto else 0
-            pct_compras = total_importe / total_proyecto * 100 if total_proyecto else 0
-            v1, v2, v3 = st.columns(3)
-            with v1:
-                build_metric_card('Coste total proyecto (€)', format_number(total_proyecto, 2))
-            with v2:
-                build_metric_card('% coste interno', f'{format_number(pct_interno, 1)}%')
-            with v3:
-                build_metric_card('% compras NO GPI', f'{format_number(pct_compras, 1)}%')
-
-        if estimado_total is not None:
-            desviacion_global = (float(coste_interno_total or 0) + total_importe) - float(estimado_total)
-            build_metric_card('Desviación global vs EDT (€)', format_number(desviacion_global, 2))
-
         monthly_amount = filtered.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
         ranking_proveedores = self.aggregate_dimension(filtered, 'proveedor').head(15)
         ranking_departamentos = self.aggregate_dimension(filtered, 'departamento').head(15)

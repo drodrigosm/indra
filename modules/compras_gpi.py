@@ -80,11 +80,20 @@ class ComprasGpiModule:
         return (code + ' - ' + name).str.strip(' -')
 
     def parse_importe(self, series: pd.Series) -> pd.Series:
-        if pd.api.types.is_numeric_dtype(series):
-            return pd.to_numeric(series, errors='coerce').fillna(0)
-        values = series.astype('string').fillna('').str.strip().str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-        return pd.to_numeric(values, errors='coerce').fillna(0)
-
+        def normalize_amount(value):
+            if pd.isna(value):
+                return 0.0
+            if isinstance(value, int) or isinstance(value, float):
+                return float(value)
+            text = str(value).strip().replace('€', '').replace(' ', '')
+            if text == '':
+                return 0.0
+            if ',' in text and '.' in text:
+                text = text.replace('.', '').replace(',', '.')
+            elif ',' in text:
+                text = text.replace(',', '.')
+            return pd.to_numeric(text, errors='coerce')
+        return series.apply(normalize_amount).fillna(0).astype(float)
     def parse_period(self, series: pd.Series) -> pd.Series:
         parsed = pd.to_datetime(series.astype('string').str.strip(), format='%m/%Y', errors='coerce')
         if parsed.isna().all():

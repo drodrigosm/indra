@@ -97,7 +97,7 @@ def classify_uploaded_project_files(uploaded_files: list) -> dict:
             classified['dedicaciones'] = uploaded_file
         elif filename_contains(file_name, ['ISPR_25C']):
             classified['compras_no_gpi'] = uploaded_file
-        elif filename_contains(file_name, ['ISPR25PX']):
+        elif filename_contains(file_name, ['ISPR25PX','ISPR_25PX']):
             classified['compras_gpi'] = uploaded_file
         elif filename_contains(file_name, ['ISPR_25S', 'ISPR_25U']):
             classified['almacenaje'].append(uploaded_file)
@@ -123,8 +123,8 @@ def run_app() -> None:
     gastos_viaje_module = GastosViajeModule()
 
     with st.expander('Carga de carpeta del proyecto', expanded=True):
-        uploaded_project_files = st.file_uploader('Selecciona la carpeta del proyecto', type=['xls', 'xlsx'], accept_multiple_files='directory', key='uploaded_project_folder')
-        st.caption('La app detecta automáticamente: Dedicaciones, Compras NO GPI, Compras GPI, Almacenaje y Gastos de Viaje según el nombre del fichero.')
+        uploaded_project_files = st.file_uploader('Selecciona la carpeta del proyecto', type=['xls', 'xlsx'], accept_multiple_files=True, key='uploaded_project_folder')
+        st.caption('La app detecta automáticamente: Dedicaciones (ISPR_25D), Compras NO GPI (ISPR_25C), Compras GPI (ISPR_25PX), Almacenaje (IPSR_25S y/o ISPR_25U) y Gastos de Viaje (ISPR_25F y/o ISPR_25G) según el nombre del fichero.')
 
     classified_files = classify_uploaded_project_files(uploaded_project_files)
     if classified_files['ignored']:

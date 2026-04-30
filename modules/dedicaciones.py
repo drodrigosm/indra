@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from data_common import normalize_text_key, try_convert_xls_to_xlsx
+from data_common import normalize_text_key, read_excel_robust
 from ui_common import DISPLAY_COLUMNS, PALETTE, PLOTLY_COLOR_SEQUENCE, build_metric_card, format_number, render_corporate_dataframe
 
 
@@ -21,12 +21,7 @@ class DedicacionesModule:
         return format_number(value, decimals)
 
     def load_dedicaciones_dataframe(self, file_path: Path) -> pd.DataFrame:
-        source_path = try_convert_xls_to_xlsx(file_path)
-        read_kwargs = {'sheet_name': 'Hoja1', 'header': None}
-        try:
-            df_raw = pd.read_excel(source_path, **read_kwargs)
-        except ImportError as exc:
-            raise RuntimeError('No se ha podido leer el Excel. Instala xlrd para ficheros .xls o convierte el fichero a .xlsx.') from exc
+        df_raw = read_excel_robust(file_path, sheet_name='Hoja1', header=None)
         if df_raw.shape[1] < len(self.RAW_COLUMNS):
             raise RuntimeError(f'El Excel no tiene las columnas esperadas. Columnas detectadas: {df_raw.shape[1]}')
 
@@ -41,10 +36,12 @@ class DedicacionesModule:
         df['nombre'] = df['empleado_nombre'].fillna('')
         df['departamento'] = (df['elemento_codigo'].fillna('') + ' - ' + df['elemento_nombre'].fillna('')).str.strip(' -')
         df['empleado'] = (df['empleado_codigo'].fillna('') + ' - ' + df['empleado_nombre'].fillna('')).str.strip(' -')
+        df['departamento'] = df['departamento'].replace('', 'Sin departamento')
+        df['empleado'] = df['empleado'].replace('', 'Sin empleado')
         df['fecha'] = pd.to_datetime(df['fecha'].astype('string').str.strip(), format='%m/%Y', errors='coerce')
         for col in ['horas_aplicadas', 'tasa', 'cantidad']:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        df = df[(df['departamento'] != '') & (df['empleado'] != '')].copy()
+        df = df[(df['horas_aplicadas'] != 0) | (df['cantidad'] != 0)].copy()
         df['periodo'] = df['fecha'].dt.strftime('%Y-%m').fillna('Sin periodo')
         return df
 
