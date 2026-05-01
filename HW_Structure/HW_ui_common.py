@@ -20,9 +20,11 @@ def inject_custom_theme():
         "[data-testid='stSidebar'] ::placeholder { color:rgba(0,66,84,0.65) !important; opacity:1 !important; }"
         ".stButton button, .stDownloadButton button { background-color:var(--turquesa) !important; color:var(--texto-claro) !important; border:1px solid var(--turquesa) !important; border-radius:8px !important; font-weight:700 !important; }"
         ".stButton button:hover, .stDownloadButton button:hover { background-color:var(--azul-oscuro) !important; color:var(--texto-claro) !important; border:1px solid var(--azul-oscuro) !important; }"
-        "[data-testid='stSidebar'] .stButton button { background-color:var(--turquesa) !important; color:var(--texto-claro) !important; border:1px solid var(--turquesa) !important; border-radius:8px !important; font-weight:700 !important; }"
-        "[data-testid='stSidebar'] .stButton button:hover { background-color:var(--azul-oscuro) !important; color:var(--texto-claro) !important; border:1px solid var(--azul-oscuro) !important; }"
-        ".stTabs [data-baseweb='tab'] { color:var(--gris-ceramica) !important; background-color:transparent !important; font-weight:700 !important; }"
+       "[data-testid='stSidebar'] .stButton button { background-color:var(--turquesa) !important; color:var(--texto-claro) !important; border:1px solid var(--turquesa) !important; border-radius:8px !important; font-weight:700 !important; }"
+        "[data-testid='stSidebar'] .stButton button:hover { background-color:#55CDD6 !important; color:var(--texto-sobre-claro) !important; border:1px solid #55CDD6 !important; }"
+        "[data-testid='stSidebar'] .stButton button[kind='primary'] { background-color:#BDEFF2 !important; color:var(--texto-sobre-claro) !important; border:2px solid #FF5A5F !important; box-shadow:0 0 0 2px rgba(255,90,95,0.18) !important; font-weight:900 !important; }"
+        "[data-testid='stSidebar'] .stButton button[kind='primary']:hover { background-color:#DDFBFC !important; color:var(--texto-sobre-claro) !important; border:2px solid #FF5A5F !important; box-shadow:0 0 0 2px rgba(255,90,95,0.18) !important; }"
+        "[data-testid='stSidebar'] .stButton button[kind='primary']:hover { background-color:#DDFBFC !important; color:var(--texto-sobre-claro) !important; border:2px solid #FF5A5F !important; }"        ".stTabs [data-baseweb='tab'] { color:var(--gris-ceramica) !important; background-color:transparent !important; font-weight:700 !important; }"
         ".stTabs [aria-selected='true'] { color:var(--turquesa) !important; border-bottom:2px solid var(--turquesa) !important; }"
         ".stSlider [data-baseweb='slider'] div { color:var(--texto-claro) !important; }"
         "[data-testid='stSidebar'] .stSlider [data-baseweb='slider'] div { color:var(--texto-sobre-claro) !important; }"
@@ -52,8 +54,8 @@ def render_file_table(path):
         st.caption("Sin contenido directo.")
         return
     table_df = content[["tipo", "codigo", "nivel", "nombre", "tamano", "ruta"]].copy()
-    st.dataframe(style_dark_dataframe(table_df), use_container_width=True, hide_index=True)
-
+    table_df = table_df.fillna("NOT AVAILABLE").astype(str)
+    st.dataframe(style_dark_dataframe(table_df), width="stretch", hide_index=True)
 
 def render_level_summary(df):
     if df.empty:
@@ -61,4 +63,5 @@ def render_level_summary(df):
     summary = df.groupby("level").agg(elementos=("code", "count"), carpetas=("dirs", "sum"), ficheros=("files", "sum")).reset_index()
     summary["nivel"] = summary["level"].apply(lambda value: f"Nivel {int(value)}")
     table_df = summary[["nivel", "elementos", "carpetas", "ficheros"]].copy()
-    st.dataframe(style_dark_dataframe(table_df), use_container_width=True, hide_index=True)
+    table_df = table_df.fillna("NOT AVAILABLE").astype(str)
+    st.dataframe(style_dark_dataframe(table_df), width="stretch", hide_index=True)

@@ -127,11 +127,11 @@ def get_direct_content(path):
         try:
             item_type = "Carpeta" if item.is_dir() else "Fichero"
             item_code = get_code_from_name(item.name)
-            item_level = get_level_from_code(item_code)
+            item_level = str(get_level_from_code(item_code)) if item_code else "NOT AVAILABLE"
             item_size = "" if item.is_dir() else format_size(item.stat().st_size)
-            rows.append({"tipo": item_type, "codigo": item_code, "nivel": item_level if item_code else "", "nombre": item.name, "ruta": str(item), "tamano": item_size})
+            rows.append({"tipo": item_type, "codigo": item_code if item_code else "NOT AVAILABLE", "nivel": item_level, "nombre": item.name, "ruta": str(item), "tamano": item_size})
         except Exception:
-            rows.append({"tipo": "Error", "codigo": "", "nivel": "", "nombre": item.name, "ruta": str(item), "tamano": ""})
+            rows.append({"tipo": "Error", "codigo": "NOT AVAILABLE", "nivel": "NOT AVAILABLE", "nombre": item.name, "ruta": str(item), "tamano": ""})
     return pd.DataFrame(rows)
 
 
@@ -201,12 +201,17 @@ def get_main_element_row(df, code):
 def get_children_by_code(df, parent_code):
     if df.empty or not parent_code:
         return pd.DataFrame()
+    if parent_code == "A00":
+        children = df[(df["level"] == 1) & (df["code"] != "A00") & (df["exists"] == True)].copy()
+        return children.sort_values(["level", "code", "component", "path"]).reset_index(drop=True)
     children = df[(df["parent_code"] == parent_code) & (df["exists"] == True)].copy()
     return children.sort_values(["level", "code", "component", "path"]).reset_index(drop=True)
-
 
 def get_descendant_rows_by_code(df, selected_code):
     if df.empty or not selected_code:
         return pd.DataFrame()
+    if selected_code == "A00":
+        descendants = df[df["exists"] == True].copy()
+        return descendants.sort_values(["level", "code", "component", "path"]).reset_index(drop=True)
     descendants = df[(df["code"].astype(str).str.startswith(selected_code)) & (df["exists"] == True)].copy()
     return descendants.sort_values(["level", "code", "component", "path"]).reset_index(drop=True)

@@ -6,7 +6,7 @@ import pandas as pd
 from data_common import save_uploaded_file_to_temp
 from modules.dedicaciones import DedicacionesModule
 from ppt.dedicaciones_ppt import build_committee_presentation
-from HW_ui_common import build_metric_card, inject_custom_theme, render_indra_branding
+from ui_common import build_metric_card, inject_custom_theme, render_indra_branding
 from modules.compras_gpi import ComprasGpiModule
 from modules.compras_no_gpi import ComprasNoGpiModule
 from modules.almacenaje import AlmacenajeModule
@@ -226,7 +226,7 @@ def run_app() -> None:
     if 'ppt_bytes' not in st.session_state:
         st.session_state.ppt_bytes = None
 
-    if st.button('Generar y descargar PowerPoint', use_container_width=True):
+    if st.button('Generar y descargar PowerPoint', width="stretch"):
         if filtered is None or filtered.empty:
             st.error('No hay datos para generar la presentación.')
             st.session_state.ppt_bytes = None
@@ -238,7 +238,7 @@ def run_app() -> None:
                 st.session_state.ppt_bytes = build_committee_presentation(filtered, str(template_ppt_path), report_title='Informe de Costes del Proyecto', document_name='Informe de Costes del Proyecto')
 
     if st.session_state.ppt_bytes is not None:
-        st.download_button('Descargar PowerPoint generado', data=st.session_state.ppt_bytes, file_name='Informe_Costes_Proyecto_Indra.pptx', mime='application/vnd.openxmlformats-officedocument.presentationml.presentation', use_container_width=True)
+        st.download_button('Descargar PowerPoint generado', data=st.session_state.ppt_bytes, file_name='Informe_Costes_Proyecto_Indra.pptx', mime='application/vnd.openxmlformats-officedocument.presentationml.presentation', width="stretch")
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:

@@ -1,6 +1,11 @@
 {
   "description": "Configuracion de elementos principales HW del simulador. Define los niveles principales que se muestran en el sidebar de la aplicacion.",
   "main_hw_elements": [
+	{
+      "code": "A00",
+      "component": "SIM",
+      "sica": ""
+    },
     {
       "code": "A01",
       "component": "COCKPIT",

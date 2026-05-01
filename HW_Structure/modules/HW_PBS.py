@@ -1,28 +1,9 @@
-# Modulo visual para mostrar la estructura HW del simulador, sus niveles, carpetas, ficheros y busqueda.
+# Modulo principal HW PBS. Muestra la estructura hardware del simulador para el elemento seleccionado en el sidebar global.
 
 import pandas as pd
 import streamlit as st
-from HW_scanner import add_missing_main_elements, count_content, format_size, get_children_by_code, get_code_from_name, get_description_from_name, get_descendant_rows_by_code, get_direct_content, get_main_element_row, get_sidebar_main_elements, safe_iterdir, scan_hw_folders
+from HW_scanner import add_missing_main_elements, count_content, format_size, get_children_by_code, get_code_from_name, get_description_from_name, get_descendant_rows_by_code, get_direct_content, get_level_from_code, get_main_element_row, get_sidebar_main_elements, safe_iterdir, scan_hw_folders
 from HW_ui_common import render_file_table, render_level_summary
-
-
-def set_selected_main_element(code):
-    st.session_state["selected_hw_code"] = code
-
-
-def render_hw_sidebar(df):
-    st.sidebar.subheader("Estructura principal del simulador")
-    main_elements = get_sidebar_main_elements(df)
-    for main in main_elements:
-        main_row = get_main_element_row(df, main["code"])
-        exists = bool(main_row.get("exists", False)) if main_row is not None else False
-        label = f"{main['code']} - {main['component']}"
-        selected_mark = " ✅" if st.session_state.get("selected_hw_code", "") == main["code"] else ""
-        if not exists:
-            st.sidebar.caption(f"{label} · no encontrado")
-            continue
-        if st.sidebar.button(f"{label}{selected_mark}", key=f"main_sidebar_{main['code']}", use_container_width=True):
-            set_selected_main_element(main["code"])
 
 def render_logical_tree_node(df, row, depth, max_depth):
     code = row.get("code", "")
@@ -51,14 +32,15 @@ def render_hw_tree_expandable(df, root_code, max_depth):
     render_logical_tree_node(df, root_row, 0, max_depth)
 
 
-def render_tree(path, max_depth, show_empty_folders, current_depth=0):
-    if current_depth > max_depth:
-        return
+def render_tree(path, max_hw_level, show_empty_folders, current_depth=0):
     items = safe_iterdir(path)
     folders = [item for item in items if item.is_dir()]
     files = [item for item in items if item.is_file()]
     for folder in folders:
         code = get_code_from_name(folder.name)
+        level = get_level_from_code(code)
+        if code and level > max_hw_level:
+            continue
         description = get_description_from_name(folder.name)
         direct_content = get_direct_content(folder)
         direct_dirs = int((direct_content["tipo"] == "Carpeta").sum()) if not direct_content.empty else 0
@@ -67,16 +49,17 @@ def render_tree(path, max_depth, show_empty_folders, current_depth=0):
         if not show_empty_folders and total_files == 0:
             continue
         label_code = code if code else "SIN CODIGO"
-        label = f"{label_code} · {description} · {direct_dirs} carpetas · {direct_files} ficheros directos · {total_files} ficheros total"
+        label_level = level if code else ""
+        label = f"{label_code} · Nivel {label_level} · {description} · {direct_dirs} carpetas · {direct_files} ficheros directos · {total_files} ficheros total"
         with st.expander(label, expanded=current_depth < 1):
             st.caption(str(folder))
             render_file_table(folder)
-            render_tree(folder, max_depth, show_empty_folders, current_depth + 1)
+            render_tree(folder, max_hw_level, show_empty_folders, current_depth + 1)
     if files:
         file_rows = []
         for file in files:
             file_rows.append({"fichero": file.name, "tamano": format_size(file.stat().st_size), "ruta": str(file)})
-        st.dataframe(pd.DataFrame(file_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(file_rows), width="stretch", hide_index=True)
 
 
 def render_search_results(df, search_text):
@@ -90,13 +73,15 @@ def render_search_results(df, search_text):
     if filtered.empty:
         st.warning("No se han encontrado elementos con ese texto.")
         return
-    st.dataframe(filtered[["code", "level", "component", "sica", "dirs", "files", "path"]], use_container_width=True, hide_index=True)
+    st.dataframe(filtered[["code", "level", "component", "sica", "dirs", "files", "path"]], width="stretch", hide_index=True)
 
 
 def build_component_list_text(selected_df, selected_code):
     if selected_df.empty:
         return ""
     components = selected_df[selected_df["code"] != selected_code].copy()
+    if selected_code == "A00":
+        components = components[components["level"] == 1].copy()
     if components.empty:
         return ""
     values = []
@@ -143,19 +128,19 @@ def render_node_content(node):
     files_df = content[content["tipo"] == "Fichero"].copy()
     tab_all, tab_folders, tab_files = st.tabs(["Contenido directo", "Carpetas", "Ficheros"])
     with tab_all:
-        st.dataframe(content[["tipo", "codigo", "nivel", "nombre", "tamano", "ruta"]], use_container_width=True, hide_index=True)
+        st.dataframe(content[["tipo", "codigo", "nivel", "nombre", "tamano", "ruta"]], width="stretch", hide_index=True)
     with tab_folders:
         if folders_df.empty:
             st.info("No hay carpetas directas.")
         else:
-            st.dataframe(folders_df[["tipo", "codigo", "nivel", "nombre", "ruta"]], use_container_width=True, hide_index=True)
+            st.dataframe(folders_df[["tipo", "codigo", "nivel", "nombre", "ruta"]], width="stretch", hide_index=True)
     with tab_files:
         if files_df.empty:
             st.info("No hay ficheros directos.")
         else:
-            st.dataframe(files_df[["nombre", "tamano", "ruta"]], use_container_width=True, hide_index=True)
+            st.dataframe(files_df[["nombre", "tamano", "ruta"]], width="stretch", hide_index=True)
 
-def render_selected_element(df, selected_code, max_depth, show_empty_folders):
+def render_selected_element(df, selected_code, max_hw_level, show_empty_folders):
     selected_row = get_main_element_row(df, selected_code)
     if selected_row is None:
         st.warning("No se ha encontrado el elemento seleccionado.")
@@ -172,30 +157,36 @@ def render_selected_element(df, selected_code, max_depth, show_empty_folders):
             st.metric("CODIGO SICA", sica)
         return
     selected_df = get_descendant_rows_by_code(df, code)
+    selected_df = selected_df[selected_df["level"] <= max_hw_level].copy()
     if not show_empty_folders and not selected_df.empty:
-        selected_df = selected_df[selected_df["files"] > 0].copy()
-    total_dirs = int(selected_row.get("dirs", 0))
-    total_files = int(selected_row.get("files", 0))
-    composed_count = max(len(selected_df) - 1, 0)
+        selected_df = selected_df[(selected_df["files"] > 0) | (selected_df["code"] == code)].copy()
+    if code == "A00":
+        level_1_df = selected_df[(selected_df["level"] == 1) & (selected_df["code"] != "A00")].copy()
+        total_dirs = int(level_1_df["dirs"].sum()) if not level_1_df.empty else int(selected_row.get("dirs", 0))
+        total_files = int(level_1_df["files"].sum()) if not level_1_df.empty else int(selected_row.get("files", 0))
+        composed_count = len(selected_df[selected_df["code"] != code]) if not selected_df.empty else 0
+    else:
+        total_dirs = int(selected_row.get("dirs", 0))
+        total_files = int(selected_row.get("files", 0))
+        composed_count = max(len(selected_df[selected_df["code"] != code]) if not selected_df.empty else 0, 0)
     component_list = build_component_list_text(selected_df, code)
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("REF. HW", code)
     col2.metric("CODIGO SICA", sica if sica else "No informado")
     col3.metric("Carpetas", total_dirs)
     col4.metric("Ficheros", total_files)
-    col5.metric("Elementos", composed_count)
-    details = pd.DataFrame([{"REF. HW": code, "COMPONENTE": component, "CODIGO SICA": sica, "Nivel": selected_row.get("level", ""), "Ruta": path, "Carpetas": total_dirs, "Ficheros": total_files, "Elementos que lo componen": component_list}])
-    st.dataframe(details, use_container_width=True, hide_index=True)
+    col5.metric("Elementos visibles", composed_count)
+    details = pd.DataFrame([{"REF. HW": code, "COMPONENTE": component, "CODIGO SICA": sica, "Nivel": selected_row.get("level", ""), "Nivel HW máximo": max_hw_level, "Ruta": path, "Carpetas": total_dirs, "Ficheros": total_files, "Elementos visibles": component_list}])
+    st.dataframe(details, width="stretch", hide_index=True)
     tab_tree, tab_elements, tab_visual, tab_levels, tab_content = st.tabs(["Árbol lógico", "Elementos que lo componen", "Explorador visual", "Resumen niveles", "Contenido directo"])
     with tab_tree:
-        st.caption("Árbol lógico construido por código HW, no por estructura física de carpetas.")
-        tree_depth = st.slider("Profundidad del árbol lógico", min_value=1, max_value=10, value=6, key=f"logical_tree_depth_{code}")
-        render_hw_tree_expandable(selected_df, code, tree_depth)
+        st.caption("Árbol lógico construido por código HW. El nivel máximo se controla desde el sidebar.")
+        render_hw_tree_expandable(selected_df, code, max_hw_level)
         st.divider()
         st.subheader("Inspeccionar nodo del árbol")
         node_options = build_node_options(selected_df)
         if not node_options:
-            st.info("No hay nodos disponibles para inspeccionar.")
+            st.info("No hay nodos disponibles para inspeccionar con el nivel HW seleccionado.")
         else:
             labels = [item["label"] for item in node_options]
             selected_label = st.selectbox("Selecciona un nodo para ver su carpeta y ficheros", options=labels, key=f"node_selector_{code}")
@@ -205,35 +196,23 @@ def render_selected_element(df, selected_code, max_depth, show_empty_folders):
         st.subheader("Elementos que lo componen")
         table_df = selected_df[selected_df["code"] != code].copy()
         if table_df.empty:
-            st.info("Este elemento no tiene subelementos detectados.")
+            st.info("Este elemento no tiene subelementos detectados para el nivel HW seleccionado.")
         else:
-            st.dataframe(table_df[["code", "parent_code", "level", "component", "sica", "dirs", "files", "path"]], use_container_width=True, hide_index=True)
+            st.dataframe(table_df[["code", "parent_code", "level", "component", "sica", "dirs", "files", "path"]], width="stretch", hide_index=True)
     with tab_visual:
         st.caption(path)
-        render_tree(path, max_depth, show_empty_folders)
+        render_tree(path, max_hw_level, show_empty_folders)
     with tab_levels:
         render_level_summary(selected_df)
     with tab_content:
         render_file_table(path)
 
-
-def render_hw_structure(root_path, max_depth, show_empty_folders, search_text):
-    df = scan_hw_folders(root_path)
-    df = add_missing_main_elements(df)
-    if not show_empty_folders and not df.empty:
-        df = df[(df["files"] > 0) | (df["level"] == 1)].copy()
+def render_hw_pbs(df, selected_code, max_hw_level, show_empty_folders, search_text):
     if df.empty:
         st.warning("No se han encontrado carpetas con códigos tipo A01, A0101, A010101 con los filtros actuales.")
-        render_file_table(root_path)
         return
-    if "selected_hw_code" not in st.session_state:
-        first_existing = df[(df["level"] == 1) & (df["exists"] == True)].sort_values("code")
-        if not first_existing.empty:
-            st.session_state["selected_hw_code"] = first_existing.iloc[0]["code"]
-    render_hw_sidebar(df)
-    selected_code = st.session_state.get("selected_hw_code", "")
     tab_selected, tab_search = st.tabs(["Elemento seleccionado", "Búsqueda"])
     with tab_selected:
-        render_selected_element(df, selected_code, max_depth, show_empty_folders)
+        render_selected_element(df, selected_code, max_hw_level, show_empty_folders)
     with tab_search:
         render_search_results(df, search_text)
