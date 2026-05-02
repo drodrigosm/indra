@@ -7,9 +7,11 @@ import streamlit as st
 from HW_scanner import get_descendant_rows_by_code, get_main_element_row
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
+EXCEL_READ_ENGINE = "calamine"
 LM_FILE_PATTERN = re.compile(r"^(?P<lm_code>.+LM\d{2})_A(?P<revision>\d+)\.(xlsx|xlsm|xls)$", re.IGNORECASE)
 LM_COLUMNS = ["CODIGO MATERIAL", "CANTIDAD", "REF.TOP.", "UNIDAD", "PROBABILIDAD", "DESCRIPCION", "P/N", "MNF", "ELEC/MEC", "CHECK BOM"]
 LM_NORMALIZED_COLUMNS = {"CODIGO MATERIAL": "CODIGO MATERIAL", "CODIGO_MATERIAL": "CODIGO MATERIAL", "CANTIDAD": "CANTIDAD", "REF.TOP.": "REF.TOP.", "REF. TOP.": "REF.TOP.", "REF TOP": "REF.TOP.", "REF_TOP": "REF.TOP.", "UNIDAD": "UNIDAD", "PROBABILIDAD": "PROBABILIDAD", "BORRAR": "DESCRIPCION", "P/N": "P/N", "PN": "P/N", "P.N": "P/N", "P/N MANUFACTURER": "P/N", "PN MANUFACTURER": "P/N", "DESCRIPCION": "DESCRIPCION", "DESCRIPCIÓN": "DESCRIPCION", "Descripcion": "DESCRIPCION", "MNF": "MNF", "MANUFACTURER": "MNF", "FABRICANTE": "MNF", "ELEC/MEC": "ELEC/MEC", "ELEC MEC": "ELEC/MEC", "ELEC_MEC": "ELEC/MEC", "CHECK BOM": "CHECK BOM", "CHECK_BOM": "CHECK BOM"}
+
 
 def normalize_lm_header(value):
     if value is None:
@@ -30,7 +32,7 @@ def find_latest_lm_files(paths, root_path=None):
     valid_paths = [Path(path) for path in paths if path and Path(path).exists() and Path(path).is_dir()]
     if not valid_paths:
         return []
-    relative_root = Path(root_path) if root_path else min(valid_paths, key=lambda item: len(str(item)))
+    relative_root = Path(root_path) if root_path and Path(root_path).exists() else min(valid_paths, key=lambda item: len(str(item)))
     for base_path in valid_paths:
         for file_path in base_path.rglob("*"):
             if not file_path.is_file():
@@ -69,23 +71,29 @@ def get_lm_sheet_score(raw_df):
 
 @st.cache_data(show_spinner=False)
 def read_lm_sheet_preview_cached(file_path, sheet_name, file_mtime_ns, file_size):
-    return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=str, nrows=80)
+    return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=str, nrows=80, engine=EXCEL_READ_ENGINE)
 
 @st.cache_data(show_spinner=False)
 def read_lm_sheet_full_cached(file_path, sheet_name, file_mtime_ns, file_size):
-    return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=str)
+    return pd.read_excel(file_path, sheet_name=sheet_name, header=None, dtype=str, engine=EXCEL_READ_ENGINE)
 
 def get_file_cache_stamp(path):
     stat = Path(path).stat()
     return stat.st_mtime_ns, stat.st_size
 
+def format_lm_read_error(error):
+    error_text = str(error)
+    if "Permission denied" in error_text or "WinError 32" in error_text or "being used by another process" in error_text or "El proceso no tiene acceso" in error_text:
+        return f"No se puede leer el fichero. Puede estar abierto, bloqueado por Excel o usado por otro proceso. Detalle: {error_text}"
+    return f"Error leyendo el fichero. Detalle: {error_text}"
+
 def read_best_lm_sheet(path):
     file_path = str(path)
     try:
         file_mtime_ns, file_size = get_file_cache_stamp(file_path)
-        excel_file = pd.ExcelFile(file_path)
-    except Exception:
-        return None, None
+        excel_file = pd.ExcelFile(file_path, engine=EXCEL_READ_ENGINE)
+    except Exception as error:
+        return None, None, format_lm_read_error(error)
     best_sheet = None
     best_header_row = None
     best_score = -1
@@ -94,29 +102,32 @@ def read_best_lm_sheet(path):
         try:
             preview_df = read_lm_sheet_preview_cached(file_path, sheet_name, file_mtime_ns, file_size)
             score, header_row = get_lm_sheet_score(preview_df)
-        except Exception:
+        except Exception as error:
             continue
         if score > best_score:
             best_sheet = sheet_name
             best_header_row = header_row
             best_score = score
     if best_sheet is None or best_header_row is None:
-        return None, None
+        return None, None, "No se ha podido detectar una hoja válida o una cabecera reconocible de LM."
     try:
         raw_df = read_lm_sheet_full_cached(file_path, best_sheet, file_mtime_ns, file_size)
-        return raw_df, best_header_row
-    except Exception:
-        return None, None
+        return raw_df, best_header_row, ""
+    except Exception as error:
+        return None, None, format_lm_read_error(error)
 
 @st.cache_data(show_spinner=False)
 def read_lm_file_cached(file_path, lm_code, revision_label, relative_path, file_mtime_ns, file_size):
     log_lines = []
     log_prefix = f"{lm_code} {revision_label} | {relative_path}"
-    raw_df, header_row = read_best_lm_sheet(file_path)
+    
+    raw_df, header_row, read_error = read_best_lm_sheet(file_path)
     if raw_df is None or header_row is None:
-        log_lines.append(f"[ERROR] {log_prefix} | No se ha podido detectar una hoja válida o cabecera de LM.")
+        error_message = read_error if read_error else "No se ha podido detectar una hoja válida o cabecera de LM."
+        log_lines.append(f"[ERROR] {log_prefix} | {error_message}")
         empty_df = pd.DataFrame(columns=["LM DOC", "Edición", "Origen fichero"] + LM_COLUMNS)
         return empty_df, log_lines
+    
     log_lines.append(f"[OK] {log_prefix} | Hoja válida detectada. Fila cabecera: {header_row + 1}.")
     headers = [normalize_lm_header(value) for value in raw_df.iloc[header_row].tolist()]
     data_df = raw_df.iloc[header_row + 1:].copy()
@@ -180,8 +191,10 @@ def read_lm_file(file_info):
     lm_df.attrs["lm_read_log"] = log_lines
     return lm_df
 
-def get_selected_hw_paths(df, selected_code):
-    if df.empty or not selected_code:
+def get_selected_hw_paths(df, selected_code, root_path=None):
+    if not selected_code:
+        return []
+    if df.empty:
         return []
     if selected_code == "A00":
         selected_df = df[df["exists"] == True].copy()
@@ -247,8 +260,8 @@ def render_lms(df, selected_code):
     selected_code_value = selected_row.get("code", "")
     selected_component = selected_row.get("component", "")
     st.subheader(f"LMs - {selected_code_value} - {selected_component}")
-    selected_paths = get_selected_hw_paths(df, selected_code)
-    root_path = get_hw_root_path(df)
+    root_path = st.session_state.get("root_path", "")
+    selected_paths = get_selected_hw_paths(df, selected_code, root_path)
     lm_files = find_latest_lm_files(selected_paths, root_path)
     if not lm_files:
         st.subheader("Elemento HW Sin Lista de Materiales")
@@ -284,9 +297,34 @@ def render_lms(df, selected_code):
     last_columns = ["Origen fichero"]
     remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
     materials_df = materials_df[priority_columns + remaining_columns + last_columns]
-    st.caption(f"{len(lm_files)} listas de materiales encontradas. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
+    
+    required_material_fields = ["CODIGO MATERIAL", "CANTIDAD", "REF.TOP.", "UNIDAD"]
+    missing_required_mask = materials_df[required_material_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
+    materials_df["Campos obligatorios incompletos"] = missing_required_mask.map({True: "SI", False: "NO"})
+    materials_with_missing_required = int(missing_required_mask.sum())
+    export_required_fields = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION"]
+    export_missing_mask = materials_df[export_required_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
+    export_missing_df = materials_df[export_missing_mask].copy()
+    export_missing_count = len(export_missing_df)
+    total_lm_files = len(lm_files)
+    loaded_lm_files = len(loaded_tables)
+    unreadable_lm_files = len(unreadable_files)
+    priority_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "Campos obligatorios incompletos"]
+    last_columns = ["Origen fichero"]
+    remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
+    materials_df = materials_df[priority_columns + remaining_columns + last_columns]
+    info_col, export_col = st.columns([5, 1])
+    info_col.caption(f"{total_lm_files} listas de materiales encontradas. {loaded_lm_files} listas cargadas correctamente. {unreadable_lm_files} listas no cargadas. {len(materials_df)} materiales cargados. {materials_with_missing_required} materiales cargados sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {export_missing_count} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
+        
+        
+    
+    if export_missing_count > 0:
+        export_csv = export_missing_df.to_csv(index=False, sep=";").encode("utf-8-sig")
+        export_col.download_button("Exportar errores CSV", data=export_csv, file_name=f"LMs_{selected_code_value}_registros_not_available.csv", mime="text/csv", key=f"download_lm_missing_priority_{selected_code_value}")
+    else:
+        export_col.button("Exportar errores CSV", disabled=True, key=f"download_lm_missing_priority_disabled_{selected_code_value}")
     if unreadable_files:
-        st.warning("No se han podido cargar estas listas: " + ", ".join(unreadable_files))
+        st.error("Hay LMs que no se han podido leer. Revisa si están abiertas, bloqueadas o corruptas: " + ", ".join(unreadable_files))
     render_lm_materials_table(materials_df)
     read_log_lines.append(f"[OK] Tabla fusionada | LMs válidas cargadas: {len(loaded_tables)}.")
     read_log_lines.append(f"[OK] Tabla fusionada | Filas totales fusionadas: {len(materials_df)}.")

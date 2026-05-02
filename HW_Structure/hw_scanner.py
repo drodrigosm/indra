@@ -11,6 +11,7 @@ PADDED_CODE_PATTERN = re.compile(r"^(A\d+)")
 DEFAULT_MAIN_HW_ELEMENTS = [{"code": "A01", "component": "COCKPIT", "sica": ""}, {"code": "A02", "component": "AFTERCABIN", "sica": ""}, {"code": "A03", "component": "VISUAL DISPLAY SYSTEM", "sica": ""}, {"code": "A04", "component": "BASEFRAME", "sica": ""}, {"code": "A05", "component": "DRAWBRIDGE", "sica": ""}, {"code": "A07", "component": "MOTION SYSTEM", "sica": ""}, {"code": "A08", "component": "PROCESSOR RACK #1", "sica": ""}, {"code": "A09", "component": "PROCESSOR RACK #2", "sica": ""}, {"code": "A12", "component": "UPS", "sica": ""}, {"code": "A14", "component": "BREATHING AIR", "sica": ""}, {"code": "A15", "component": "AIR CONDITIONING SYSTEM", "sica": ""}, {"code": "A18", "component": "FIRE DETECTION", "sica": ""}, {"code": "A21", "component": "POWER CABINET", "sica": ""}, {"code": "A26", "component": "PLANNER STATION", "sica": ""}, {"code": "A27", "component": "DEBRIEFING STATION", "sica": ""}]
 MAIN_HW_ELEMENTS_JSON_PATH = Path(__file__).resolve().parent / "main_hw_elements.json"
 
+
 def load_main_hw_elements():
     if not MAIN_HW_ELEMENTS_JSON_PATH.exists():
         return DEFAULT_MAIN_HW_ELEMENTS
@@ -32,6 +33,10 @@ def load_main_hw_elements():
 
 def get_main_hw_elements():
     return load_main_hw_elements()
+
+def normalize_text_key(value):
+    return re.sub(r"\s+", " ", str(value).strip().upper())
+
 
 def normalize_code(raw_code):
     if raw_code is None:
@@ -74,12 +79,10 @@ def get_level_from_code(code):
         return 0
     return int(len(code[1:]) / 2)
 
-
 def get_parent_code(code):
     if not code or get_level_from_code(code) <= 1:
         return ""
     return "A" + code[1:-2]
-
 
 def get_main_code(code):
     if not code or len(code) < 3:
