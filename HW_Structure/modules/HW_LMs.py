@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import pandas as pd
 import streamlit as st
-from HW_scanner import get_descendant_rows_by_code, get_main_element_row
+from HW_scanner import get_descendant_rows_by_code, get_main_element_row, get_sidebar_main_elements
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 EXCEL_READ_ENGINE = "calamine"
@@ -196,14 +196,31 @@ def get_selected_hw_paths(df, selected_code, root_path=None):
         return []
     if df.empty:
         return []
-    if selected_code == "A00":
-        selected_df = df[df["exists"] == True].copy()
-    else:
-        selected_df = get_descendant_rows_by_code(df, selected_code)
+    selected_code_text = str(selected_code).strip().upper()
+    if selected_code_text == "A00":
+        return []
+    selected_df = get_descendant_rows_by_code(df, selected_code_text)
     if selected_df.empty or "path" not in selected_df.columns:
         return []
     paths = selected_df["path"].dropna().astype(str).tolist()
     return [path for path in paths if path.strip()]
+
+def get_lm_files_for_selected_code(df, selected_code, root_path=None):
+    selected_code_text = str(selected_code).strip().upper()
+    if selected_code_text != "A00":
+        selected_paths = get_selected_hw_paths(df, selected_code_text, root_path)
+        return find_latest_lm_files(selected_paths, root_path)
+    lm_files = []
+    sidebar_elements = get_sidebar_main_elements(df)
+    for main in sidebar_elements:
+        main_code = str(main.get("code", "")).strip().upper()
+        main_exists = bool(main.get("exists", False))
+        if not main_code or main_code == "A00" or not main_exists:
+            continue
+        main_paths = get_selected_hw_paths(df, main_code, root_path)
+        main_lm_files = find_latest_lm_files(main_paths, root_path)
+        lm_files.extend(main_lm_files)
+    return sorted(lm_files, key=lambda item: (item.get("relative_path", ""), item.get("lm_code", ""), item.get("revision", 0)))
 
 def get_hw_root_path(df):
     if df.empty or "path" not in df.columns:
@@ -261,8 +278,7 @@ def render_lms(df, selected_code):
     selected_component = selected_row.get("component", "")
     st.subheader(f"LMs - {selected_code_value} - {selected_component}")
     root_path = st.session_state.get("root_path", "")
-    selected_paths = get_selected_hw_paths(df, selected_code, root_path)
-    lm_files = find_latest_lm_files(selected_paths, root_path)
+    lm_files = get_lm_files_for_selected_code(df, selected_code, root_path)
     if not lm_files:
         st.subheader("Elemento HW Sin Lista de Materiales")
         return
