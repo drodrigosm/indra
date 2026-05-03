@@ -462,15 +462,16 @@ def render_lms(df, selected_code):
         st.subheader("Elemento HW Sin Lista de Materiales")
         render_lm_read_log(read_log_lines)
         return
-    info_col, export_col = st.columns([5, 1])
+    info_col, export_errors_col, export_table_col = st.columns([5, 1, 1])
     info_col.caption(f"{metrics['total_lm_files']} listas de materiales encontradas. {metrics['loaded_lm_files']} listas cargadas correctamente. {metrics['unreadable_lm_files']} listas no cargadas. {len(materials_df)} materiales cargados. {metrics['materials_with_missing_required']} materiales cargados sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {metrics['export_missing_count']} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
     if metrics["export_missing_count"] > 0:
         export_csv = export_missing_df.to_csv(index=False, sep=";").encode("utf-8-sig")
-        export_col.download_button("Exportar errores CSV", data=export_csv, file_name=f"LMs_{selected_code_value}_registros_not_available.csv", mime="text/csv", key=f"download_lm_missing_priority_{selected_code_value}")
+        export_errors_col.download_button("Exportar errores CSV", data=export_csv, file_name=f"LMs_{selected_code_value}_registros_not_available.csv", mime="text/csv", key=f"download_lm_missing_priority_{selected_code_value}")
     else:
-        export_col.button("Exportar errores CSV", disabled=True, key=f"download_lm_missing_priority_disabled_{selected_code_value}")
+        export_errors_col.button("Exportar errores CSV", disabled=True, key=f"download_lm_missing_priority_disabled_{selected_code_value}")
+    table_export_csv = materials_df.to_csv(index=False, sep=";").encode("utf-8-sig")
+    export_table_col.download_button("Exportar tabla CSV", data=table_export_csv, file_name=f"LMs_{selected_code_value}_tabla_materiales.csv", mime="text/csv", key=f"download_lm_active_table_{selected_code_value}")
     if unreadable_files:
         st.error("Hay LMs que no se han podido leer. Revisa si están abiertas, bloqueadas o corruptas: " + ", ".join(unreadable_files))
     render_lm_materials_table(materials_df)
     render_lm_read_log(read_log_lines)
-
