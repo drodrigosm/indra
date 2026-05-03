@@ -1,10 +1,11 @@
 # Modulo principal LMs. Carga y muestra las Listas de Materiales asociadas al elemento HW seleccionado en el sidebar global.
 
 from pathlib import Path
+import os
 import re
 import pandas as pd
 import streamlit as st
-from HW_scanner import get_descendant_rows_by_code, get_main_element_row, get_sidebar_main_elements
+from HW_scanner import get_descendant_rows_by_code, get_level_from_code, get_main_element_row, get_sidebar_main_elements
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 EXCEL_READ_ENGINE = "calamine"
@@ -48,6 +49,100 @@ def find_latest_lm_files(paths, root_path=None):
             if current is None or file_info["revision"] > current["revision"]:
                 latest_files[file_info["lm_code"]] = file_info
     return sorted(latest_files.values(), key=lambda item: item["lm_code"])
+
+
+
+def build_lm_hw_path_signature(df):
+    if df is None or df.empty or "path" not in df.columns:
+        return tuple()
+    records = []
+    for _, row in df[df["exists"] == True].copy().iterrows():
+        code = str(row.get("code", "")).strip().upper()
+        path = str(row.get("path", "")).strip()
+        level = int(row.get("level", 0)) if str(row.get("level", "")).strip() else 0
+        if code and path and Path(path).exists() and Path(path).is_dir():
+            records.append((code, path, level))
+    return tuple(sorted(set(records), key=lambda item: (item[2], item[0], item[1])))
+
+
+def is_path_inside(child_path, parent_path):
+    try:
+        child = os.path.abspath(str(child_path))
+        parent = os.path.abspath(str(parent_path))
+        return os.path.commonpath([child, parent]) == parent
+    except Exception:
+        return False
+
+
+def build_lm_global_file_index(df, root_path=None):
+    indexed_files = []
+    if df is None or df.empty:
+        return indexed_files
+    sidebar_elements = get_sidebar_main_elements(df)
+    for main in sidebar_elements:
+        main_code = str(main.get("code", "")).strip().upper()
+        main_exists = bool(main.get("exists", False))
+        if not main_code or main_code == "A00" or not main_exists:
+            continue
+        main_paths = get_selected_hw_paths(df, main_code, root_path)
+        main_lm_files = find_latest_lm_files(main_paths, root_path)
+        for file_info in main_lm_files:
+            indexed_item = dict(file_info)
+            indexed_item["main_code"] = main_code
+            indexed_files.append(indexed_item)
+    return sorted(indexed_files, key=lambda item: (item.get("main_code", ""), item.get("relative_path", ""), item.get("lm_code", ""), item.get("revision", 0)))
+
+def select_latest_lm_files(lm_files):
+    latest_files = {}
+    for file_info in lm_files:
+        lm_code = str(file_info.get("lm_code", "")).strip().upper()
+        if not lm_code:
+            continue
+        current = latest_files.get(lm_code)
+        if current is None or int(file_info.get("revision", 0)) > int(current.get("revision", 0)):
+            latest_files[lm_code] = file_info
+    return sorted(latest_files.values(), key=lambda item: item.get("lm_code", ""))
+
+
+def get_lm_files_from_index_for_code(df, selected_code, lm_file_index, root_path=None):
+    selected_code_text = str(selected_code).strip().upper()
+    if not selected_code_text or df.empty or not lm_file_index:
+        return []
+    if selected_code_text == "A00":
+        return sorted(list(lm_file_index), key=lambda item: (item.get("relative_path", ""), item.get("lm_code", ""), item.get("revision", 0)))
+    if get_level_from_code(selected_code_text) == 1:
+        return sorted([file_info for file_info in lm_file_index if str(file_info.get("main_code", "")).strip().upper() == selected_code_text], key=lambda item: (item.get("relative_path", ""), item.get("lm_code", ""), item.get("revision", 0)))
+    selected_paths = get_selected_hw_paths(df, selected_code_text, root_path)
+    return find_latest_lm_files(selected_paths, root_path) if selected_paths else []
+
+def get_all_lm_files_from_index(lm_file_index):
+    return sorted(list(lm_file_index or []), key=lambda item: (item.get("relative_path", ""), item.get("lm_code", ""), item.get("revision", 0)))
+
+
+def preload_lm_material_files(lm_file_signature, progress_bar=None, status_box=None, start_percent=65, end_percent=98):
+    total_files = len(lm_file_signature)
+    loaded_files = 0
+    unreadable_files = 0
+    if total_files == 0:
+        if progress_bar is not None:
+            progress_bar.progress(end_percent)
+        if status_box is not None:
+            status_box.info("No se han detectado ficheros LM para precargar.")
+        return {"total_lm_files": 0, "loaded_lm_files": 0, "unreadable_lm_files": 0}
+    for index, record in enumerate(lm_file_signature):
+        file_path, lm_code, revision, revision_label, relative_path, file_mtime_ns, file_size = record
+        if status_box is not None:
+            status_box.info(f"Precargando LM {index + 1}/{total_files}: {lm_code} {revision_label} | {relative_path}")
+        try:
+            lm_df, log_lines = read_lm_file_cached(file_path, lm_code, revision_label, relative_path, file_mtime_ns, file_size)
+            loaded_files += 0 if lm_df.empty else 1
+            unreadable_files += 1 if lm_df.empty else 0
+        except Exception:
+            unreadable_files += 1
+        if progress_bar is not None:
+            current_percent = int(start_percent + ((index + 1) / total_files) * (end_percent - start_percent))
+            progress_bar.progress(min(current_percent, end_percent))
+    return {"total_lm_files": total_files, "loaded_lm_files": loaded_files, "unreadable_lm_files": unreadable_files}
 
 def detect_lm_header_row(raw_df):
     for index, row in raw_df.iterrows():
@@ -206,6 +301,9 @@ def get_selected_hw_paths(df, selected_code, root_path=None):
     return [path for path in paths if path.strip()]
 
 def get_lm_files_for_selected_code(df, selected_code, root_path=None):
+    lm_file_index = st.session_state.get("lm_global_file_index", [])
+    if lm_file_index:
+        return get_lm_files_from_index_for_code(df, selected_code, lm_file_index, root_path)
     selected_code_text = str(selected_code).strip().upper()
     if selected_code_text != "A00":
         selected_paths = get_selected_hw_paths(df, selected_code_text, root_path)
@@ -232,6 +330,80 @@ def get_hw_root_path(df):
         return str(Path(paths[0]).anchor) if len(paths) == 1 else str(Path(paths[0]).parent if len(paths) == 1 else Path(__import__("os").path.commonpath(paths)))
     except Exception:
         return None
+
+def build_lm_file_signature(lm_files):
+    records = []
+    for file_info in lm_files:
+        file_path = str(file_info.get("path", ""))
+        try:
+            file_mtime_ns, file_size = get_file_cache_stamp(file_path)
+        except Exception:
+            file_mtime_ns, file_size = 0, 0
+        records.append((file_path, str(file_info.get("lm_code", "")).upper(), int(file_info.get("revision", 0)), str(file_info.get("revision_label", "")), str(file_info.get("relative_path", file_path)), int(file_mtime_ns), int(file_size)))
+    return tuple(sorted(records, key=lambda item: (item[4], item[1], item[2], item[0])))
+
+def build_empty_lm_materials_result(lm_file_signature, read_log_lines=None, unreadable_files=None):
+    materials_df = pd.DataFrame(columns=["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "Campos obligatorios incompletos", "CANTIDAD", "REF.TOP.", "UNIDAD", "PROBABILIDAD", "P/N", "MNF", "ELEC/MEC", "CHECK BOM", "Origen fichero"])
+    export_missing_df = pd.DataFrame(columns=materials_df.columns)
+    metrics = {"total_lm_files": len(lm_file_signature), "loaded_lm_files": 0, "unreadable_lm_files": len(unreadable_files or []), "materials_with_missing_required": 0, "export_missing_count": 0}
+    return materials_df, export_missing_df, read_log_lines or [], unreadable_files or [], metrics
+
+@st.cache_data(show_spinner=False)
+def load_lm_materials_cached(lm_file_signature):
+    loaded_tables = []
+    unreadable_files = []
+    read_log_lines = []
+    for file_path, lm_code, revision, revision_label, relative_path, file_mtime_ns, file_size in lm_file_signature:
+        if not file_path:
+            unreadable_files.append(f"{lm_code} {revision_label} | Ruta de fichero no disponible")
+            read_log_lines.append(f"[ERROR] {lm_code} {revision_label} | Ruta de fichero no disponible.")
+            continue
+        if file_mtime_ns == 0 and file_size == 0 and not Path(file_path).exists():
+            unreadable_files.append(f"{lm_code} {revision_label} | {relative_path}")
+            read_log_lines.append(f"[ERROR] {lm_code} {revision_label} | {relative_path} | No se puede acceder al fichero.")
+            continue
+        lm_df, log_lines = read_lm_file_cached(file_path, lm_code, revision_label, relative_path, file_mtime_ns, file_size)
+        read_log_lines.extend(log_lines)
+        if lm_df.empty:
+            unreadable_files.append(f"{lm_code} {revision_label} | {relative_path}")
+            continue
+        loaded_tables.append(lm_df)
+    if not loaded_tables:
+        if unreadable_files:
+            read_log_lines.append("[ERROR] No se ha podido cargar ninguna LM válida para el elemento seleccionado.")
+        return build_empty_lm_materials_result(lm_file_signature, read_log_lines, unreadable_files)
+    materials_df = pd.concat(loaded_tables, ignore_index=True)
+    materials_df = materials_df.rename(columns={"LM DOC": "LM_DOC", "Edición": "EDICION"})
+    duplicated_columns = materials_df.columns[materials_df.columns.duplicated()].tolist()
+    if duplicated_columns:
+        read_log_lines.append(f"[OK] Tabla fusionada | Columnas duplicadas eliminadas correctamente tras la fusión: {', '.join(duplicated_columns)}.")
+        materials_df = materials_df.loc[:, ~materials_df.columns.duplicated()].copy()
+    required_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "CANTIDAD", "REF.TOP.", "UNIDAD", "PROBABILIDAD", "P/N", "MNF", "ELEC/MEC", "CHECK BOM", "Origen fichero"]
+    for column in required_columns:
+        if column not in materials_df.columns:
+            materials_df[column] = "NOT AVAILABLE"
+            read_log_lines.append(f"[WARNING] Tabla fusionada | Columna obligatoria no existente en la fusión, añadida como NOT AVAILABLE: {column}.")
+    priority_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION"]
+    last_columns = ["Origen fichero"]
+    remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
+    materials_df = materials_df[priority_columns + remaining_columns + last_columns]
+    required_material_fields = ["CODIGO MATERIAL", "CANTIDAD", "REF.TOP.", "UNIDAD"]
+    missing_required_mask = materials_df[required_material_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
+    materials_df["Campos obligatorios incompletos"] = missing_required_mask.map({True: "SI", False: "NO"})
+    materials_with_missing_required = int(missing_required_mask.sum())
+    export_required_fields = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION"]
+    export_missing_mask = materials_df[export_required_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
+    export_missing_df = materials_df[export_missing_mask].copy()
+    export_missing_count = len(export_missing_df)
+    priority_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "Campos obligatorios incompletos"]
+    last_columns = ["Origen fichero"]
+    remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
+    materials_df = materials_df[priority_columns + remaining_columns + last_columns]
+    read_log_lines.append(f"[OK] Tabla fusionada | LMs válidas cargadas: {len(loaded_tables)}.")
+    read_log_lines.append(f"[OK] Tabla fusionada | Filas totales fusionadas: {len(materials_df)}.")
+    read_log_lines.append(f"[OK] Tabla fusionada | Columnas finales: {', '.join(materials_df.columns.tolist())}.")
+    metrics = {"total_lm_files": len(lm_file_signature), "loaded_lm_files": len(loaded_tables), "unreadable_lm_files": len(unreadable_files), "materials_with_missing_required": materials_with_missing_required, "export_missing_count": export_missing_count}
+    return materials_df, export_missing_df, read_log_lines, unreadable_files, metrics
 
 def render_lm_materials_table(materials_df):
     grid_builder = GridOptionsBuilder.from_dataframe(materials_df)
@@ -282,59 +454,17 @@ def render_lms(df, selected_code):
     if not lm_files:
         st.subheader("Elemento HW Sin Lista de Materiales")
         return
-    loaded_tables = []
-    unreadable_files = []
-    read_log_lines = []
-    for file_info in lm_files:
-        lm_df = read_lm_file(file_info)
-        read_log_lines.extend(lm_df.attrs.get("lm_read_log", []))
-        if lm_df.empty:
-            unreadable_files.append(f"{file_info['lm_code']} {file_info['revision_label']} | {file_info.get('relative_path', str(file_info['path']))}")
-            continue
-        loaded_tables.append(lm_df)
-    if not loaded_tables:
+    lm_file_signature = build_lm_file_signature(lm_files)
+    st.caption(f"{len(lm_file_signature)} listas de materiales detectadas para el elemento seleccionado. La lectura y fusión quedan cacheadas hasta actualizar la lectura o modificar los ficheros.")
+    with st.spinner("Cargando LMs del elemento seleccionado..."):
+        materials_df, export_missing_df, read_log_lines, unreadable_files, metrics = load_lm_materials_cached(lm_file_signature)
+    if materials_df.empty:
         st.subheader("Elemento HW Sin Lista de Materiales")
-        if unreadable_files:
-            read_log_lines.append("[ERROR] No se ha podido cargar ninguna LM válida para el elemento seleccionado.")
         render_lm_read_log(read_log_lines)
         return
-    materials_df = pd.concat(loaded_tables, ignore_index=True)
-    materials_df = materials_df.rename(columns={"LM DOC": "LM_DOC", "Edición": "EDICION"})
-    duplicated_columns = materials_df.columns[materials_df.columns.duplicated()].tolist()
-    if duplicated_columns:
-        read_log_lines.append(f"[OK] Tabla fusionada | Columnas duplicadas eliminadas correctamente tras la fusión: {', '.join(duplicated_columns)}.")
-        materials_df = materials_df.loc[:, ~materials_df.columns.duplicated()].copy()
-    required_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "CANTIDAD", "REF.TOP.", "UNIDAD", "PROBABILIDAD", "P/N", "MNF", "ELEC/MEC", "CHECK BOM", "Origen fichero"]
-    for column in required_columns:
-        if column not in materials_df.columns:
-            materials_df[column] = "NOT AVAILABLE"
-            read_log_lines.append(f"[WARNING] Tabla fusionada | Columna obligatoria no existente en la fusión, añadida como NOT AVAILABLE: {column}.")
-    priority_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION"]
-    last_columns = ["Origen fichero"]
-    remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
-    materials_df = materials_df[priority_columns + remaining_columns + last_columns]
-    
-    required_material_fields = ["CODIGO MATERIAL", "CANTIDAD", "REF.TOP.", "UNIDAD"]
-    missing_required_mask = materials_df[required_material_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
-    materials_df["Campos obligatorios incompletos"] = missing_required_mask.map({True: "SI", False: "NO"})
-    materials_with_missing_required = int(missing_required_mask.sum())
-    export_required_fields = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION"]
-    export_missing_mask = materials_df[export_required_fields].astype(str).apply(lambda row: any(value.strip() == "" or value.strip().upper() == "NOT AVAILABLE" or value.strip().lower() == "nan" for value in row), axis=1)
-    export_missing_df = materials_df[export_missing_mask].copy()
-    export_missing_count = len(export_missing_df)
-    total_lm_files = len(lm_files)
-    loaded_lm_files = len(loaded_tables)
-    unreadable_lm_files = len(unreadable_files)
-    priority_columns = ["CODIGO MATERIAL", "DESCRIPCION", "LM_DOC", "EDICION", "Campos obligatorios incompletos"]
-    last_columns = ["Origen fichero"]
-    remaining_columns = [column for column in materials_df.columns if column not in priority_columns and column not in last_columns]
-    materials_df = materials_df[priority_columns + remaining_columns + last_columns]
     info_col, export_col = st.columns([5, 1])
-    info_col.caption(f"{total_lm_files} listas de materiales encontradas. {loaded_lm_files} listas cargadas correctamente. {unreadable_lm_files} listas no cargadas. {len(materials_df)} materiales cargados. {materials_with_missing_required} materiales cargados sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {export_missing_count} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
-        
-        
-    
-    if export_missing_count > 0:
+    info_col.caption(f"{metrics['total_lm_files']} listas de materiales encontradas. {metrics['loaded_lm_files']} listas cargadas correctamente. {metrics['unreadable_lm_files']} listas no cargadas. {len(materials_df)} materiales cargados. {metrics['materials_with_missing_required']} materiales cargados sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {metrics['export_missing_count']} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
+    if metrics["export_missing_count"] > 0:
         export_csv = export_missing_df.to_csv(index=False, sep=";").encode("utf-8-sig")
         export_col.download_button("Exportar errores CSV", data=export_csv, file_name=f"LMs_{selected_code_value}_registros_not_available.csv", mime="text/csv", key=f"download_lm_missing_priority_{selected_code_value}")
     else:
@@ -342,7 +472,5 @@ def render_lms(df, selected_code):
     if unreadable_files:
         st.error("Hay LMs que no se han podido leer. Revisa si están abiertas, bloqueadas o corruptas: " + ", ".join(unreadable_files))
     render_lm_materials_table(materials_df)
-    read_log_lines.append(f"[OK] Tabla fusionada | LMs válidas cargadas: {len(loaded_tables)}.")
-    read_log_lines.append(f"[OK] Tabla fusionada | Filas totales fusionadas: {len(materials_df)}.")
-    read_log_lines.append(f"[OK] Tabla fusionada | Columnas finales: {', '.join(materials_df.columns.tolist())}.")
     render_lm_read_log(read_log_lines)
+
