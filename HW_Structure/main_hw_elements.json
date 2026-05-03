@@ -1,7 +1,7 @@
 {
   "description": "Configuracion de elementos principales HW del simulador. Define los niveles principales que se muestran en el sidebar de la aplicacion.",
   "main_hw_elements": [
-	{
+    {
       "code": "A00",
       "component": "SIM",
       "sica": ""
@@ -81,6 +81,21 @@
       "component": "DEBRIEFING STATION",
       "sica": ""
     }
-	
+  ],
+  "special_hw_elements": [
+    {
+      "code": "X01",
+      "component": "CABLE SET PROCESSOR RACK",
+      "match": "CABLE SET PROCESSOR RACK",
+      "sica": "",
+      "scan_all_children": true
+    },
+    {
+      "code": "X02",
+      "component": "INTERCONNECTIONS",
+      "match": "INTERCONNECTIONS",
+      "sica": "",
+      "scan_all_children": true
+    }
   ]
 }
