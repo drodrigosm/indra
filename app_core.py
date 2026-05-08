@@ -256,7 +256,7 @@ def run_app() -> None:
     selected_section = render_navigation(navigation_sections)
 
     if selected_section == 'general':
-        dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered, compras_gpi_df=compras_gpi_df)
+        dedicaciones_module.render_tab_general(filtered, project_summary_total=project_summary_total, project_summary_filtered=project_summary_filtered, compras_gpi_df=compras_gpi_df, compras_no_gpi_df=compras_no_gpi_df, almacenaje_df=almacenaje_df, gastos_viaje_df=gastos_viaje_df)
     elif selected_section == 'departamento_horas':
         dedicaciones_module.render_tab_departamento_horas(filtered)
     elif selected_section == 'empleado_horas':

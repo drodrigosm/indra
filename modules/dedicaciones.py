@@ -164,6 +164,31 @@ class DedicacionesModule:
         fig.update_traces(marker_color=PALETTE['turquesa'], textposition='outside', textfont=dict(color=PALETTE['texto_claro'], size=12), cliponaxis=False, hovertemplate='%{x}<br>%{y:,.2f} €<extra></extra>')
         fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title='Importe (€)', margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), showlegend=False)
         st.plotly_chart(fig, use_container_width=True, key=key)
+    
+    def plot_general_compras_no_gpi_monthly_amount(self, df_plot: pd.DataFrame, title: str, key: str) -> None:
+        plot_df = df_plot.copy()
+        plot_df['label_valor'] = plot_df['cantidad'].apply(lambda v: format_number(v, 0))
+        fig = px.bar(plot_df, x='periodo', y='cantidad', title=title, text='label_valor')
+        fig.update_traces(marker_color=PALETTE['turquesa'], textposition='outside', textfont=dict(color=PALETTE['texto_claro'], size=12), cliponaxis=False, hovertemplate='%{x}<br>%{y:,.2f} €<extra></extra>')
+        fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title='Importe (€)', margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
+    def plot_general_almacenaje_monthly_amount(self, df_plot: pd.DataFrame, title: str, key: str) -> None:
+        plot_df = df_plot.copy()
+        plot_df['label_valor'] = plot_df['cantidad'].apply(lambda v: format_number(v, 0))
+        fig = px.bar(plot_df, x='periodo', y='cantidad', title=title, text='label_valor')
+        fig.update_traces(marker_color=PALETTE['turquesa'], textposition='outside', textfont=dict(color=PALETTE['texto_claro'], size=12), cliponaxis=False, hovertemplate='%{x}<br>%{y:,.2f} €<extra></extra>')
+        fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title='Importe (€)', margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+    def plot_general_gastos_viaje_monthly_amount(self, df_plot: pd.DataFrame, title: str, key: str) -> None:
+        plot_df = df_plot.copy()
+        plot_df['label_valor'] = plot_df['cantidad'].apply(lambda v: format_number(v, 0))
+        fig = px.bar(plot_df, x='periodo', y='cantidad', title=title, text='label_valor')
+        fig.update_traces(marker_color=PALETTE['turquesa'], textposition='outside', textfont=dict(color=PALETTE['texto_claro'], size=12), cliponaxis=False, hovertemplate='%{x}<br>%{y:,.2f} €<extra></extra>')
+        fig.update_layout(height=520, xaxis_title='Periodo', yaxis_title='Importe (€)', margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor=PALETTE['azul_amazonico'], plot_bgcolor=PALETTE['azul_amazonico'], font=dict(color=PALETTE['texto_claro']), title_font=dict(color=PALETTE['texto_claro']), xaxis=dict(type='category', gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), yaxis=dict(gridcolor='rgba(227,226,218,0.18)', zerolinecolor='rgba(227,226,218,0.18)'), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
     def plot_bar(self, df_plot: pd.DataFrame, x_col: str, y_col: str, title: str) -> None:
         plot_df = df_plot.copy()
@@ -276,42 +301,54 @@ class DedicacionesModule:
     def render_global_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.copy()
 
-    def render_tab_general(self, filtered: pd.DataFrame, project_summary: dict | None = None, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None, compras_gpi_df: pd.DataFrame | None = None) -> None:
+    def render_tab_general(self, filtered: pd.DataFrame | None, project_summary: dict | None = None, project_summary_total: dict | None = None, project_summary_filtered: dict | None = None, compras_gpi_df: pd.DataFrame | None = None, compras_no_gpi_df: pd.DataFrame | None = None, almacenaje_df: pd.DataFrame | None = None, gastos_viaje_df: pd.DataFrame | None = None) -> None:
         st.subheader('Sección General · Evolución anual por departamento y empleado')
 
         def build_value_with_pct(selected_value: float, total_value: float, decimals: int = 2) -> str:
             pct = selected_value / total_value * 100 if total_value else 0
             return f'{format_number(selected_value, decimals)} / {format_number(total_value, decimals)}<br><span style="font-size:0.95rem;color:#E3E2DA;font-weight:600;">{format_number(pct, 1)}% del total</span>'
 
-        general_departamentos = ['Todos'] + sorted([v for v in filtered['departamento'].dropna().unique().tolist() if str(v).strip()])
-        general_empleados = ['Todos'] + sorted([v for v in filtered['empleado'].dropna().unique().tolist() if str(v).strip()])
-
-        f1, f2 = st.columns(2)
-        with f1:
-            general_departamento_selected = st.selectbox('Departamento', options=general_departamentos, key='general_departamento_selected')
-        with f2:
-            general_empleado_selected = st.selectbox('Empleado', options=general_empleados, key='general_empleado_selected')
-
-        if general_departamento_selected != 'Todos' and general_empleado_selected != 'Todos':
-            general_filtered_view = filtered[(filtered['departamento'] == general_departamento_selected) & (filtered['empleado'] == general_empleado_selected)].copy()
-        elif general_departamento_selected != 'Todos':
-            general_filtered_view = filtered[filtered['departamento'] == general_departamento_selected].copy()
-        elif general_empleado_selected != 'Todos':
-            general_filtered_view = filtered[filtered['empleado'] == general_empleado_selected].copy()
-        else:
-            general_filtered_view = filtered.copy()
+        has_dedicaciones = filtered is not None and not filtered.empty and 'departamento' in filtered.columns and 'empleado' in filtered.columns and 'cantidad' in filtered.columns and 'horas_aplicadas' in filtered.columns and 'periodo' in filtered.columns
+        has_compras_gpi = compras_gpi_df is not None and not compras_gpi_df.empty and 'periodo' in compras_gpi_df.columns and 'cantidad' in compras_gpi_df.columns
+        has_compras_no_gpi = compras_no_gpi_df is not None and not compras_no_gpi_df.empty and 'periodo' in compras_no_gpi_df.columns and 'cantidad' in compras_no_gpi_df.columns
+        has_almacenaje = almacenaje_df is not None and not almacenaje_df.empty and 'periodo' in almacenaje_df.columns and 'cantidad' in almacenaje_df.columns
+        has_gastos_viaje = gastos_viaje_df is not None and not gastos_viaje_df.empty and 'periodo' in gastos_viaje_df.columns and 'cantidad' in gastos_viaje_df.columns
 
         project_summary_total = project_summary_total or project_summary or {}
         project_summary_filtered = project_summary_filtered or project_summary_total
-        total_project_cost = float(project_summary_total.get('total_cost', filtered['cantidad'].sum()))
-        total_project_hours = float(project_summary_total.get('total_hours', filtered['horas_aplicadas'].sum()))
-        total_project_departments = int(project_summary_total.get('total_departments', filtered['departamento'].nunique()))
-        total_project_employees = int(project_summary_total.get('total_employees', filtered['empleado'].nunique()))
-        has_general_filter = general_departamento_selected != 'Todos' or general_empleado_selected != 'Todos'
-        selected_cost = float(general_filtered_view['cantidad'].sum()) if has_general_filter else float(project_summary_filtered.get('total_cost', filtered['cantidad'].sum()))
-        selected_hours = float(general_filtered_view['horas_aplicadas'].sum()) if has_general_filter else float(project_summary_filtered.get('total_hours', filtered['horas_aplicadas'].sum()))
-        selected_departments = int(general_filtered_view['departamento'].nunique()) if has_general_filter else int(project_summary_filtered.get('total_departments', filtered['departamento'].nunique()))
-        selected_employees = int(general_filtered_view['empleado'].nunique()) if has_general_filter else int(project_summary_filtered.get('total_employees', filtered['empleado'].nunique()))
+        total_project_cost = float(project_summary_total.get('total_cost', 0))
+        total_project_hours = float(project_summary_total.get('total_hours', 0))
+        total_project_departments = int(project_summary_total.get('total_departments', 0))
+        total_project_employees = int(project_summary_total.get('total_employees', 0))
+        selected_cost = float(project_summary_filtered.get('total_cost', 0))
+        selected_hours = float(project_summary_filtered.get('total_hours', 0))
+        selected_departments = int(project_summary_filtered.get('total_departments', 0))
+        selected_employees = int(project_summary_filtered.get('total_employees', 0))
+
+        general_departamento_selected = 'Todos'
+        general_empleado_selected = 'Todos'
+
+        if has_dedicaciones:
+            general_departamentos = ['Todos'] + sorted([v for v in filtered['departamento'].dropna().unique().tolist() if str(v).strip()])
+            general_empleados = ['Todos'] + sorted([v for v in filtered['empleado'].dropna().unique().tolist() if str(v).strip()])
+            f1, f2 = st.columns(2)
+            with f1:
+                general_departamento_selected = st.selectbox('Departamento', options=general_departamentos, key='general_departamento_selected')
+            with f2:
+                general_empleado_selected = st.selectbox('Empleado', options=general_empleados, key='general_empleado_selected')
+            if general_departamento_selected != 'Todos' and general_empleado_selected != 'Todos':
+                general_filtered_view = filtered[(filtered['departamento'] == general_departamento_selected) & (filtered['empleado'] == general_empleado_selected)].copy()
+            elif general_departamento_selected != 'Todos':
+                general_filtered_view = filtered[filtered['departamento'] == general_departamento_selected].copy()
+            elif general_empleado_selected != 'Todos':
+                general_filtered_view = filtered[filtered['empleado'] == general_empleado_selected].copy()
+            else:
+                general_filtered_view = filtered.copy()
+            has_general_filter = general_departamento_selected != 'Todos' or general_empleado_selected != 'Todos'
+            selected_cost = float(general_filtered_view['cantidad'].sum()) if has_general_filter else selected_cost
+            selected_hours = float(general_filtered_view['horas_aplicadas'].sum()) if has_general_filter else selected_hours
+            selected_departments = int(general_filtered_view['departamento'].nunique()) if has_general_filter else selected_departments
+            selected_employees = int(general_filtered_view['empleado'].nunique()) if has_general_filter else selected_employees
 
         k1, k2, k3, k4 = st.columns(4)
         with k1:
@@ -323,27 +360,36 @@ class DedicacionesModule:
         with k4:
             build_metric_card('Empleados filtro / proyecto', build_value_with_pct(selected_employees, total_project_employees, 0))
 
-        monthly_hours = self.aggregate_monthly_entity(filtered, 'horas_aplicadas', general_departamento_selected, general_empleado_selected)
-        monthly_amount = self.aggregate_monthly_entity(filtered, 'cantidad', general_departamento_selected, general_empleado_selected)
+        if has_dedicaciones:
+            monthly_hours = self.aggregate_monthly_entity(filtered, 'horas_aplicadas', general_departamento_selected, general_empleado_selected)
+            monthly_amount = self.aggregate_monthly_entity(filtered, 'cantidad', general_departamento_selected, general_empleado_selected)
+            st.markdown('### Evolución anual en horas')
+            self.plot_general_metric_evolution(monthly_hours, 'horas_aplicadas', 'Evolución mensual · Horas')
+            st.markdown('### Evolución anual en cantidad (€)')
+            self.plot_general_metric_evolution(monthly_amount, 'cantidad', 'Evolución mensual · Cantidad (€)')
 
-        st.markdown('### Evolución anual en horas')
-        self.plot_general_metric_evolution(monthly_hours, 'horas_aplicadas', 'Evolución mensual · Horas')
-        st.markdown('### Evolución anual en cantidad (€)')
-        self.plot_general_metric_evolution(monthly_amount, 'cantidad', 'Evolución mensual · Cantidad (€)')
+        if has_compras_gpi:
+            st.markdown('### Evolución mensual de compras GPI')
+            monthly_compras_gpi = compras_gpi_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
+            self.plot_general_compras_gpi_monthly_amount(monthly_compras_gpi, 'Evolución mensual · Compras GPI (€)', 'general_compras_gpi_evolucion_mensual')
 
-        st.markdown('### Evolución mensual de compras GPI')
-        if compras_gpi_df is None:
-            st.info('No se está recibiendo el dataframe de Compras GPI en General. Revisa la llamada desde app_core.py.')
-            return
-        if compras_gpi_df.empty:
-            st.info('Compras GPI está vacío después de aplicar los filtros globales.')
-            return
-        if 'periodo' not in compras_gpi_df.columns or 'cantidad' not in compras_gpi_df.columns:
-            st.info('Compras GPI no contiene las columnas periodo y cantidad necesarias para pintar el gráfico.')
-            return
+        if has_compras_no_gpi:
+            st.markdown('### Evolución mensual de compras NO GPI')
+            monthly_compras_no_gpi = compras_no_gpi_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
+            self.plot_general_compras_no_gpi_monthly_amount(monthly_compras_no_gpi, 'Evolución mensual · Compras NO GPI (€)', 'general_compras_no_gpi_evolucion_mensual')
 
-        monthly_compras_gpi = compras_gpi_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
-        self.plot_general_compras_gpi_monthly_amount(monthly_compras_gpi, 'Evolución mensual · Compras GPI (€)', 'general_compras_gpi_evolucion_mensual')
+        if has_almacenaje:
+            st.markdown('### Evolución mensual del coste de almacenaje')
+            monthly_almacenaje = almacenaje_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
+            self.plot_general_almacenaje_monthly_amount(monthly_almacenaje, 'Evolución mensual · Almacenaje (€)', 'general_almacenaje_evolucion_mensual')
+
+        if has_gastos_viaje:
+            st.markdown('### Evolución mensual de gastos de viaje')
+            monthly_gastos_viaje = gastos_viaje_df.groupby('periodo', dropna=False, as_index=False).agg(cantidad=('cantidad', 'sum')).sort_values('periodo')
+            self.plot_general_gastos_viaje_monthly_amount(monthly_gastos_viaje, 'Evolución mensual · Gastos de viaje (€)', 'general_gastos_viaje_evolucion_mensual')
+
+        if not has_dedicaciones and not has_compras_gpi and not has_compras_no_gpi and not has_almacenaje and not has_gastos_viaje:
+            st.info('No hay datos disponibles para mostrar gráficos en la sección General.')
 
     def render_tab_departamento_horas(self, filtered: pd.DataFrame) -> None:
         st.subheader('Sección 1 · Horas por Elemento / Departamento')
