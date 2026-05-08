@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from HW_scanner import add_missing_main_elements, count_content, format_size, get_children_by_code, get_code_from_name, get_description_from_name, get_descendant_rows_by_code, get_direct_content, get_level_from_code, get_main_element_row, get_sidebar_main_elements, safe_iterdir, scan_hw_folders
 from HW_ui_common import render_file_table, render_level_summary
+from modules.HW_material_status import format_currency, get_material_status_metrics_for_pbs
 
 def render_logical_tree_node(df, row, depth, max_depth):
     code = row.get("code", "")
@@ -140,6 +141,25 @@ def render_node_content(node):
         else:
             st.dataframe(files_df[["nombre", "tamano", "ruta"]], width="stretch", hide_index=True)
 
+def render_material_status_metrics_for_pbs(df, selected_code):
+    metrics = get_material_status_metrics_for_pbs(df, selected_code)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    if not metrics.get("source_loaded", False):
+        col1.metric("Precio por módulo", "MS no cargado")
+        col2.metric("Materiales sin precio", 0)
+        col3.metric("Materiales con precio", 0)
+        col4.metric("No encontrados MS", 0)
+        col5.metric("Encontrados MS", 0)
+        col6.metric("Materiales totales", 0)
+        return
+    col1.metric("Precio por módulo", format_currency(metrics.get("precio_modulo", 0)))
+    col2.metric("Materiales sin precio", metrics.get("materiales_sin_precio", 0))
+    col3.metric("Materiales con precio", metrics.get("materiales_con_precio", 0))
+    col4.metric("No encontrados MS", metrics.get("materiales_no_encontrados", 0))
+    col5.metric("Encontrados MS", metrics.get("materiales_encontrados", 0))
+    col6.metric("Materiales totales", metrics.get("materiales_totales", 0))
+
+
 def render_selected_element(df, selected_code, max_hw_level, show_empty_folders):
     selected_row = get_main_element_row(df, selected_code)
     if selected_row is None:
@@ -176,6 +196,7 @@ def render_selected_element(df, selected_code, max_hw_level, show_empty_folders)
     col3.metric("Carpetas", total_dirs)
     col4.metric("Ficheros", total_files)
     col5.metric("Elementos visibles", composed_count)
+    render_material_status_metrics_for_pbs(df, code)
     details = pd.DataFrame([{"REF. HW": code, "COMPONENTE": component, "CODIGO SICA": sica, "Nivel": selected_row.get("level", ""), "Nivel HW máximo": max_hw_level, "Ruta": path, "Carpetas": total_dirs, "Ficheros": total_files, "Elementos visibles": component_list}])
     st.dataframe(details, width="stretch", hide_index=True)
     tab_tree, tab_elements, tab_visual, tab_levels, tab_content = st.tabs(["Árbol lógico", "Elementos que lo componen", "Explorador visual", "Resumen niveles", "Contenido directo"])
