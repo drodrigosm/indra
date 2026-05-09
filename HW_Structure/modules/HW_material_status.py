@@ -1,39 +1,98 @@
-# Modulo principal Material Status. Carga el fichero SAP de estado de material, cruza sus materiales con las LMs del elemento seleccionado y muestra estado de compra, entrega y precio por modulo.
+# Modulo principal Material Status. Carga una vez el fichero SAP, cachea su procesamiento y cruza de forma ligera con las LMs segun la seleccion del sidebar.
 
 from pathlib import Path
 from io import BytesIO
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 import pandas as pd
 import streamlit as st
 from HW_scanner import get_main_element_row
-from HW_ui_common import style_dark_dataframe
 from modules.HW_LMs import build_lm_file_signature, get_lm_files_for_selected_code, load_lm_materials_cached
-from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
 
 MATERIAL_STATUS_REQUIRED_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Fe. Entrega", "Entrega final", "Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped."]
 MATERIAL_STATUS_OPTIONAL_COLUMNS = ["Posición sol.", "Posición ped.", "Desc.Proveedor", "Solic.", "Comprador", "Ctd. Solicitada", "Ctd. por recepcionar", "Ctd. Aceptada", "Ctd. Rechazada", "Imp.total pos SP", "Centro", "Almacen", "Estado", "Moneda Ped.", "Unidad", "Tipo Compra"]
-MATERIAL_STATUS_NUMERIC_COLUMNS = ["Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped."]
+MATERIAL_STATUS_NUMERIC_COLUMNS = ["Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada"]
 MATERIAL_STATUS_DATE_COLUMNS = ["Fecha Sol.", "Fecha Ped.", "Fe. Entrega"]
-MATERIAL_STATUS_DETAIL_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Entrega final", "Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped.", "Precio unitario real", "Importe línea calculado", "Estado entrega"]
-MATERIAL_STATUS_CROSS_COLUMNS = ["CODIGO MATERIAL", "DESCRIPCION LM", "Descripción material", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
+MATERIAL_STATUS_DETAIL_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Almacen", "Imp. unitario Ped.", "Cant Base Ped.", "Precio unitario real", "Importe línea calculado", "Estado entrega"]
+MATERIAL_STATUS_CROSS_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
+MATERIALS_ELEMENT_DEFAULT_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario"]
+MATERIAL_STATUS_DETAIL_DEFAULT_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Precio unitario real"]
+MATERIAL_STATUS_INCIDENTS_DEFAULT_COLUMNS = ["CODIGO MATERIAL", "Incidencia", "Detalle", "Prioridad"]
 
 
 def normalize_column_name(value):
     text = "" if value is None else str(value)
     text = text.replace("\xa0", " ")
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def normalize_material_key(value):
+def clean_material_text(value):
     if value is None:
         return ""
     text = str(value).replace("\xa0", " ").strip().upper()
     if text.lower() in ["", "nan", "none", "not available"]:
         return ""
-    if re.match(r"^\d+\.0$", text):
-        text = text[:-2]
+    while text.startswith("'"):
+        text = text[1:].strip()
     return text
+
+
+def expand_scientific_material_text(text):
+    clean_text = str(text).replace(" ", "").replace(",", ".")
+    if not re.match(r"^[+-]?\d+(\.\d+)?[E][+-]?\d+$", clean_text):
+        return text
+    try:
+        number = Decimal(clean_text)
+        return format(number.quantize(Decimal("1"), rounding=ROUND_HALF_UP), "f")
+    except (InvalidOperation, ValueError, OverflowError):
+        return text
+
+
+def normalize_material_display(value):
+    text = clean_material_text(value)
+    if not text:
+        return ""
+    text = expand_scientific_material_text(text)
+    text = text.replace(",", ".")
+    if re.match(r"^\d+\.0$", text):
+        return text[:-2]
+    return text
+
+
+def normalize_material_key(value):
+    display_value = normalize_material_display(value)
+    if not display_value:
+        return ""
+    text = str(display_value).replace("\xa0", " ").strip().upper()
+    text = re.sub(r"\s+", "", text)
+    text = text.replace(",", ".")
+    if re.match(r"^\d+\.00$", text):
+        return text.split(".", 1)[0]
+    if re.match(r"^\d+\.0$", text):
+        return text.split(".", 1)[0]
+    return text
+
+
+def material_keys_match(lm_key, ms_key):
+    lm_text = normalize_material_key(lm_key)
+    ms_text = normalize_material_key(ms_key)
+    if not lm_text or not ms_text:
+        return False
+    if lm_text == ms_text:
+        return True
+    if len(lm_text) >= 8 and lm_text in ms_text:
+        return True
+    if len(ms_text) >= 8 and ms_text in lm_text:
+        return True
+    return False
+
+
+def format_material_for_excel_csv(value):
+    display_value = normalize_material_display(value)
+    if re.match(r"^\d{10,}(\.\d+)?$", display_value):
+        return f'="{display_value}"'
+    return display_value
 
 
 def parse_number(value):
@@ -76,8 +135,12 @@ def format_decimal(value, digits=2):
         number = float(value)
     except Exception:
         return "0"
-    formatted = f"{number:,.{digits}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
+    return f"{number:,.{digits}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def format_date_value(value):
+    date_value = pd.to_datetime(value, errors="coerce")
+    return "" if pd.isna(date_value) else date_value.strftime("%Y-%m-%d")
 
 
 def join_unique_values(values, max_items=4):
@@ -109,12 +172,17 @@ def get_material_status_active_source():
     uploaded_name = str(st.session_state.get("material_status_uploaded_name", "")).strip()
     uploaded_bytes = st.session_state.get("material_status_uploaded_bytes", b"")
     if uploaded_name and uploaded_bytes:
-        return {"mode": "uploaded", "display_name": uploaded_name, "file_bytes": uploaded_bytes, "file_size": int(st.session_state.get("material_status_uploaded_size", len(uploaded_bytes)))}
+        return {"mode": "uploaded", "display_name": uploaded_name, "file_bytes": uploaded_bytes, "file_size": int(st.session_state.get("material_status_uploaded_size", len(uploaded_bytes))), "signature": f"uploaded|{uploaded_name}|{int(st.session_state.get('material_status_uploaded_size', len(uploaded_bytes)))}|{st.session_state.get('material_status_loaded_at', '')}"}
     path = str(st.session_state.get("material_status_file_path", "")).strip()
     if path and Path(path).exists() and Path(path).is_file():
         file_mtime_ns, file_size = get_material_status_cache_stamp(path)
-        return {"mode": "path", "display_name": path, "file_path": path, "file_mtime_ns": file_mtime_ns, "file_size": file_size}
-    return {"mode": "none", "display_name": "", "file_size": 0}
+        return {"mode": "path", "display_name": path, "file_path": path, "file_mtime_ns": file_mtime_ns, "file_size": file_size, "signature": f"path|{path}|{file_mtime_ns}|{file_size}"}
+    return {"mode": "none", "display_name": "", "file_size": 0, "signature": "none"}
+
+
+def clear_material_status_selection_cache():
+    st.session_state["material_status_selection_cache"] = {}
+    st.session_state["material_status_detail_cache"] = {}
 
 
 @st.cache_data(show_spinner=False)
@@ -131,31 +199,7 @@ def read_material_status_excel_cached(file_path, file_mtime_ns, file_size):
         raw_df = pd.read_excel(file_path, sheet_name=best_sheet, dtype=str)
     except Exception as error:
         return pd.DataFrame(), [f"[ERROR] No se puede leer la hoja {best_sheet}: {error}."]
-    raw_df.columns = [normalize_column_name(column) for column in raw_df.columns]
-    duplicated_columns = raw_df.columns[raw_df.columns.duplicated()].tolist()
-    if duplicated_columns:
-        raw_df = raw_df.loc[:, ~raw_df.columns.duplicated()].copy()
-        log_lines.append(f"[WARNING] Columnas duplicadas eliminadas en Material Status: {', '.join(sorted(set(duplicated_columns)))}.")
-    for column in MATERIAL_STATUS_REQUIRED_COLUMNS + MATERIAL_STATUS_OPTIONAL_COLUMNS:
-        if column not in raw_df.columns:
-            raw_df[column] = "NOT AVAILABLE"
-            level = "ERROR" if column in MATERIAL_STATUS_REQUIRED_COLUMNS else "WARNING"
-            log_lines.append(f"[{level}] Columna no encontrada en Material Status y añadida como NOT AVAILABLE: {column}.")
-    result_df = raw_df.copy()
-    result_df["Material Key"] = result_df["Material"].apply(normalize_material_key)
-    result_df = result_df[result_df["Material Key"] != ""].copy()
-    for column in MATERIAL_STATUS_NUMERIC_COLUMNS:
-        result_df[f"{column} Num"] = result_df[column].apply(parse_number)
-    for column in MATERIAL_STATUS_DATE_COLUMNS:
-        result_df[f"{column} Date"] = result_df[column].apply(parse_date)
-    result_df["Precio unitario real"] = result_df.apply(lambda row: row["Imp. unitario Ped. Num"] / row["Cant Base Ped. Num"] if row["Cant Base Ped. Num"] else 0.0, axis=1)
-    result_df["Importe línea calculado"] = result_df["Ctd. pedido Num"] * result_df["Precio unitario real"]
-    result_df["Entrega final normalizada"] = result_df["Entrega final"].fillna("").astype(str).str.strip().str.upper()
-    result_df["Estado entrega"] = result_df["Entrega final normalizada"].apply(lambda value: "Entregado" if value == "X" else "Pendiente")
-    result_df["Precio unitario real Texto"] = result_df["Precio unitario real"].apply(format_currency)
-    result_df["Importe línea calculado Texto"] = result_df["Importe línea calculado"].apply(format_currency)
-    log_lines.append(f"[OK] Material Status cargado correctamente. Hoja: {best_sheet}. Líneas con material: {len(result_df)}.")
-    return result_df, log_lines
+    return prepare_material_status_dataframe(raw_df, f"Hoja: {best_sheet}", log_lines)
 
 
 @st.cache_data(show_spinner=False)
@@ -172,6 +216,10 @@ def read_material_status_excel_bytes_cached(file_name, file_bytes, file_size):
         raw_df = pd.read_excel(BytesIO(file_bytes), sheet_name=best_sheet, dtype=str)
     except Exception as error:
         return pd.DataFrame(), [f"[ERROR] No se puede leer la hoja {best_sheet}: {error}."]
+    return prepare_material_status_dataframe(raw_df, f"Fichero: {file_name}. Hoja: {best_sheet}", log_lines)
+
+
+def prepare_material_status_dataframe(raw_df, source_label, log_lines):
     raw_df.columns = [normalize_column_name(column) for column in raw_df.columns]
     duplicated_columns = raw_df.columns[raw_df.columns.duplicated()].tolist()
     if duplicated_columns:
@@ -184,6 +232,7 @@ def read_material_status_excel_bytes_cached(file_name, file_bytes, file_size):
             log_lines.append(f"[{level}] Columna no encontrada en Material Status y añadida como NOT AVAILABLE: {column}.")
     result_df = raw_df.copy()
     result_df["Material Key"] = result_df["Material"].apply(normalize_material_key)
+    result_df["Material"] = result_df["Material"].apply(normalize_material_display)
     result_df = result_df[result_df["Material Key"] != ""].copy()
     for column in MATERIAL_STATUS_NUMERIC_COLUMNS:
         result_df[f"{column} Num"] = result_df[column].apply(parse_number)
@@ -193,39 +242,59 @@ def read_material_status_excel_bytes_cached(file_name, file_bytes, file_size):
     result_df["Importe línea calculado"] = result_df["Ctd. pedido Num"] * result_df["Precio unitario real"]
     result_df["Entrega final normalizada"] = result_df["Entrega final"].fillna("").astype(str).str.strip().str.upper()
     result_df["Estado entrega"] = result_df["Entrega final normalizada"].apply(lambda value: "Entregado" if value == "X" else "Pendiente")
-    result_df["Precio unitario real Texto"] = result_df["Precio unitario real"].apply(format_currency)
-    result_df["Importe línea calculado Texto"] = result_df["Importe línea calculado"].apply(format_currency)
-    log_lines.append(f"[OK] Material Status cargado correctamente. Fichero: {file_name}. Hoja: {best_sheet}. Líneas con material: {len(result_df)}.")
+    log_lines.append(f"[OK] Material Status cargado correctamente. {source_label}. Líneas con material: {len(result_df)}.")
     return result_df, log_lines
 
 
-def load_material_status_dataframe(progress_bar=None, status_box=None):
+def load_material_status_dataframe(progress_bar=None, status_box=None, force_reload=False):
     source = get_material_status_active_source()
     if source.get("mode") == "none":
         return pd.DataFrame(), ["[INFO] No hay fichero Material Status cargado."]
+    if not force_reload and st.session_state.get("material_status_active_signature", "") == source.get("signature", "") and "material_status_active_df" in st.session_state:
+        return st.session_state.get("material_status_active_df", pd.DataFrame()).copy(), list(st.session_state.get("material_status_active_log_lines", []))
     if progress_bar is not None:
-        progress_bar.progress(35)
+        progress_bar.progress(25)
     if status_box is not None:
         status_box.info(f"Leyendo fichero Material Status: {source.get('display_name', '')}")
     if source.get("mode") == "uploaded":
-        result = read_material_status_excel_bytes_cached(source.get("display_name", ""), source.get("file_bytes", b""), int(source.get("file_size", 0)))
+        result_df, log_lines = read_material_status_excel_bytes_cached(source.get("display_name", ""), source.get("file_bytes", b""), int(source.get("file_size", 0)))
     else:
-        result = read_material_status_excel_cached(source.get("file_path", ""), int(source.get("file_mtime_ns", 0)), int(source.get("file_size", 0)))
+        result_df, log_lines = read_material_status_excel_cached(source.get("file_path", ""), int(source.get("file_mtime_ns", 0)), int(source.get("file_size", 0)))
+    st.session_state["material_status_active_signature"] = source.get("signature", "")
+    st.session_state["material_status_active_source_name"] = source.get("display_name", "")
+    st.session_state["material_status_active_df"] = result_df.copy()
+    st.session_state["material_status_active_log_lines"] = list(log_lines)
+    clear_material_status_selection_cache()
     if progress_bar is not None:
-        progress_bar.progress(65)
+        progress_bar.progress(55)
+    return result_df.copy(), list(log_lines)
+
+
+def ensure_material_status_processed(progress_bar=None, status_box=None, force_reload=False):
+    source = get_material_status_active_source()
+    if source.get("mode") == "none":
+        return pd.DataFrame(), pd.DataFrame(), ["[INFO] No hay fichero Material Status cargado."], "none"
+    if not force_reload and st.session_state.get("material_status_processed_signature", "") == source.get("signature", "") and "material_status_active_df" in st.session_state and "material_status_active_agg_df" in st.session_state:
+        return st.session_state.get("material_status_active_df", pd.DataFrame()).copy(), st.session_state.get("material_status_active_agg_df", pd.DataFrame()).copy(), list(st.session_state.get("material_status_active_log_lines", [])), source.get("signature", "")
+    ms_df, log_lines = load_material_status_dataframe(progress_bar, status_box, force_reload)
     if status_box is not None:
-        status_box.info("Material Status leído. Preparando cruce con LMs...")
-    return result
+        status_box.info("Agrupando Material Status por material...")
+    if progress_bar is not None:
+        progress_bar.progress(70)
+    ms_agg_df = aggregate_material_status(ms_df)
+    st.session_state["material_status_processed_signature"] = source.get("signature", "")
+    st.session_state["material_status_active_agg_df"] = ms_agg_df.copy()
+    return ms_df.copy(), ms_agg_df.copy(), list(log_lines), source.get("signature", "")
 
 
-def load_lm_materials_for_selected_code(df, selected_code):
+def get_lm_materials_for_selected_code(df, selected_code):
     root_path = st.session_state.get("root_path", "")
     lm_files = get_lm_files_for_selected_code(df, selected_code, root_path)
+    lm_file_signature = build_lm_file_signature(lm_files) if lm_files else tuple()
     if not lm_files:
-        return pd.DataFrame(), ["[INFO] El elemento seleccionado no tiene LMs detectadas."], {"total_lm_files": 0, "loaded_lm_files": 0}
-    lm_file_signature = build_lm_file_signature(lm_files)
+        return pd.DataFrame(), ["[INFO] El elemento seleccionado no tiene LMs detectadas."], {"total_lm_files": 0, "loaded_lm_files": 0}, lm_file_signature
     materials_df, export_missing_df, read_log_lines, unreadable_files, metrics = load_lm_materials_cached(lm_file_signature)
-    return materials_df, read_log_lines, metrics
+    return materials_df, read_log_lines, metrics, lm_file_signature
 
 
 def aggregate_lm_materials(materials_df):
@@ -233,19 +302,20 @@ def aggregate_lm_materials(materials_df):
         return pd.DataFrame(columns=["MATERIAL_KEY", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "LM_DOCS"])
     result_df = materials_df.copy()
     result_df["MATERIAL_KEY"] = result_df["CODIGO MATERIAL"].apply(normalize_material_key)
+    result_df["CODIGO MATERIAL DISPLAY"] = result_df["CODIGO MATERIAL"].apply(normalize_material_display)
     result_df = result_df[result_df["MATERIAL_KEY"] != ""].copy()
     if result_df.empty:
         return pd.DataFrame(columns=["MATERIAL_KEY", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "LM_DOCS"])
     result_df["CANTIDAD LM NUM"] = result_df["CANTIDAD"].apply(parse_number) if "CANTIDAD" in result_df.columns else 0.0
     grouped_rows = []
     for material_key, group in result_df.groupby("MATERIAL_KEY", dropna=False):
-        grouped_rows.append({"MATERIAL_KEY": material_key, "CODIGO MATERIAL": join_unique_values(group["CODIGO MATERIAL"].tolist(), 1), "DESCRIPCION LM": join_unique_values(group["DESCRIPCION"].tolist(), 2) if "DESCRIPCION" in group.columns else "NOT AVAILABLE", "CANTIDAD LM": float(group["CANTIDAD LM NUM"].sum()), "LM_DOCS": join_unique_values(group["LM_DOC"].tolist(), 6) if "LM_DOC" in group.columns else "NOT AVAILABLE"})
+        grouped_rows.append({"MATERIAL_KEY": material_key, "CODIGO MATERIAL": join_unique_values(group["CODIGO MATERIAL DISPLAY"].tolist(), 1), "DESCRIPCION LM": join_unique_values(group["DESCRIPCION"].tolist(), 2) if "DESCRIPCION" in group.columns else "NOT AVAILABLE", "CANTIDAD LM": float(group["CANTIDAD LM NUM"].sum()), "LM_DOCS": join_unique_values(group["LM_DOC"].tolist(), 6) if "LM_DOC" in group.columns else "NIL"})
     return pd.DataFrame(grouped_rows)
 
 
 def aggregate_material_status(ms_df):
     if ms_df is None or ms_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["MATERIAL_KEY"])
     grouped_rows = []
     today = pd.Timestamp.today().normalize()
     for material_key, group in ms_df.groupby("Material Key", dropna=False):
@@ -259,52 +329,25 @@ def aggregate_material_status(ms_df):
         pending_dates = pending_group.dropna(subset=["Fe. Entrega Date"])["Fe. Entrega Date"].tolist()
         next_delivery = min([date for date in pending_dates if date >= today], default=pd.NaT)
         overdue_count = int(len(pending_group[pending_group["Fe. Entrega Date"] < today])) if not pending_group.empty else 0
-        grouped_rows.append({"MATERIAL_KEY": material_key, "Descripción material": join_unique_values(group["Descripción material"].tolist(), 2), "CANTIDAD PEDIDA": float(group["Ctd. pedido Num"].sum()), "CANTIDAD ENTREGADA": float(delivered_group["Ctd. pedido Num"].sum()) if not delivered_group.empty else 0.0, "CANTIDAD PENDIENTE": float(pending_group["Ctd. pedido Num"].sum()) if not pending_group.empty else 0.0, "PRECIO UNITARIO MEDIO": weighted_price, "PRECIO UNITARIO ULTIMO": last_price, "COSTE PEDIDO": float(group["Importe línea calculado"].sum()), "Nº PEDIDOS": int(group["Nº pedido"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "Nº CESTAS/SOLPEDS": int(group["Nº Cesta / Sol"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "PRIMERA FECHA SOL.": group["Fecha Sol. Date"].min(), "ULTIMA FECHA PED.": group["Fecha Ped. Date"].max(), "FECHA ENTREGA PROXIMA": next_delivery, "FECHA ENTREGA ULTIMA": group["Fe. Entrega Date"].max(), "Elemento PEP": join_unique_values(group["Elemento PEP"].tolist(), 4), "Proveedor": join_unique_values(group["Desc.Proveedor"].tolist(), 3), "VARIOS PRECIOS": "SI" if len(price_values) > 1 else "NO", "Nº PRECIOS DISTINTOS": len(price_values), "LINEAS MATERIAL STATUS": len(group), "LINEAS PENDIENTES VENCIDAS": overdue_count})
+        grouped_rows.append({"MATERIAL_KEY": material_key, "Descripción material": join_unique_values(group["Descripción material"].tolist(), 2), "CANTIDAD PEDIDA": float(group["Ctd. pedido Num"].sum()), "Ctd. Solicitada": float(group["Ctd. Solicitada Num"].sum()) if "Ctd. Solicitada Num" in group.columns else 0.0, "CANTIDAD ENTREGADA": float(delivered_group["Ctd. pedido Num"].sum()) if not delivered_group.empty else 0.0, "CANTIDAD PENDIENTE": float(pending_group["Ctd. pedido Num"].sum()) if not pending_group.empty else 0.0, "PRECIO UNITARIO MEDIO": weighted_price, "PRECIO UNITARIO ULTIMO": last_price, "COSTE PEDIDO": float(group["Importe línea calculado"].sum()), "Nº PEDIDOS": int(group["Nº pedido"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "Nº CESTAS/SOLPEDS": int(group["Nº Cesta / Sol"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "PRIMERA FECHA SOL.": group["Fecha Sol. Date"].min(), "ULTIMA FECHA PED.": group["Fecha Ped. Date"].max(), "FECHA ENTREGA PROXIMA": next_delivery, "FECHA ENTREGA ULTIMA": group["Fe. Entrega Date"].max(), "Elemento PEP": join_unique_values(group["Elemento PEP"].tolist(), 4), "Proveedor": join_unique_values(group["Desc.Proveedor"].tolist(), 3), "VARIOS PRECIOS": "SI" if len(price_values) > 1 else "NO", "Nº PRECIOS DISTINTOS": len(price_values), "LINEAS MATERIAL STATUS": len(group), "LINEAS PENDIENTES VENCIDAS": overdue_count})
     return pd.DataFrame(grouped_rows)
 
 
-def build_material_status_cross_for_selected_code(df, selected_code, progress_bar=None, status_box=None):
-    if progress_bar is not None:
-        progress_bar.progress(5)
-    if status_box is not None:
-        status_box.info("Cargando LMs del elemento seleccionado...")
-    materials_df, lm_log_lines, lm_metrics = load_lm_materials_for_selected_code(df, selected_code)
-    if progress_bar is not None:
-        progress_bar.progress(20)
-    if status_box is not None:
-        status_box.info("Agrupando materiales de LMs...")
-    lm_agg_df = aggregate_lm_materials(materials_df)
-    ms_df, ms_log_lines = load_material_status_dataframe(progress_bar, status_box)
-    if progress_bar is not None:
-        progress_bar.progress(75)
-    if status_box is not None:
-        status_box.info("Agrupando Material Status por material...")
-    ms_agg_df = aggregate_material_status(ms_df)
-    if lm_agg_df.empty:
-        empty_metrics = {"source_loaded": bool(get_material_status_source_path()), "precio_modulo": 0.0, "materiales_totales": 0, "materiales_encontrados": 0, "materiales_no_encontrados": 0, "materiales_con_precio": 0, "materiales_sin_precio": 0, "materiales_pendientes": 0, "materiales_entregados": 0, "lineas_material_status": 0}
-        return pd.DataFrame(), pd.DataFrame(), ms_df, empty_metrics, lm_log_lines + ms_log_lines
-    if ms_agg_df.empty:
-        cross_df = lm_agg_df.copy()
-        cross_df["MATERIAL_STATUS_ENCONTRADO"] = "NO"
-        cross_df["COSTE LM ESTIMADO"] = 0.0
-        metrics = {"source_loaded": bool(get_material_status_source_path()), "precio_modulo": 0.0, "materiales_totales": len(cross_df), "materiales_encontrados": 0, "materiales_no_encontrados": len(cross_df), "materiales_con_precio": 0, "materiales_sin_precio": len(cross_df), "materiales_pendientes": 0, "materiales_entregados": 0, "lineas_material_status": 0}
-        return format_cross_table(cross_df), build_incidents_table(cross_df), ms_df, metrics, lm_log_lines + ms_log_lines
-    cross_df = lm_agg_df.merge(ms_agg_df, on="MATERIAL_KEY", how="left")
-    cross_df["MATERIAL_STATUS_ENCONTRADO"] = cross_df["Descripción material"].fillna("").astype(str).apply(lambda value: "SI" if value.strip() and value.strip().lower() != "nan" else "NO")
-    for column in ["CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "Nº PRECIOS DISTINTOS", "LINEAS MATERIAL STATUS", "LINEAS PENDIENTES VENCIDAS"]:
-        if column not in cross_df.columns:
-            cross_df[column] = 0
-        cross_df[column] = cross_df[column].fillna(0)
-    cross_df["COBERTURA COMPRA"] = cross_df.apply(lambda row: row["CANTIDAD PEDIDA"] / row["CANTIDAD LM"] if row["CANTIDAD LM"] else 0.0, axis=1)
-    cross_df["ESTADO COMPRA"] = cross_df.apply(calculate_purchase_status, axis=1)
-    cross_df["ESTADO ENTREGA"] = cross_df.apply(calculate_delivery_status, axis=1)
-    cross_df["COSTE LM ESTIMADO"] = cross_df["CANTIDAD LM"] * cross_df["PRECIO UNITARIO MEDIO"]
-    cross_df["Descripción material"] = cross_df["Descripción material"].fillna("NOT AVAILABLE")
-    cross_df["Elemento PEP"] = cross_df["Elemento PEP"].fillna("NOT AVAILABLE")
-    cross_df["Proveedor"] = cross_df["Proveedor"].fillna("NOT AVAILABLE")
-    cross_df["VARIOS PRECIOS"] = cross_df["VARIOS PRECIOS"].fillna("NO")
-    metrics = {"source_loaded": bool(get_material_status_source_path()), "precio_modulo": float(cross_df["COSTE LM ESTIMADO"].sum()), "materiales_totales": int(len(cross_df)), "materiales_encontrados": int((cross_df["MATERIAL_STATUS_ENCONTRADO"] == "SI").sum()), "materiales_no_encontrados": int((cross_df["MATERIAL_STATUS_ENCONTRADO"] != "SI").sum()), "materiales_con_precio": int(((cross_df["PRECIO UNITARIO MEDIO"] > 0) & (cross_df["MATERIAL_STATUS_ENCONTRADO"] == "SI")).sum()), "materiales_sin_precio": int(((cross_df["PRECIO UNITARIO MEDIO"] <= 0) | (cross_df["MATERIAL_STATUS_ENCONTRADO"] != "SI")).sum()), "materiales_pendientes": int(cross_df["ESTADO ENTREGA"].isin(["Pendiente", "Parcial", "Retrasado"]).sum()), "materiales_entregados": int((cross_df["ESTADO ENTREGA"] == "Entregado").sum()), "lineas_material_status": int(cross_df["LINEAS MATERIAL STATUS"].sum())}
-    return format_cross_table(cross_df), build_incidents_table(cross_df), ms_df, metrics, lm_log_lines + ms_log_lines
+def build_fallback_material_status_agg(ms_df, ms_agg_df, lm_agg_df):
+    if ms_df is None or ms_df.empty or lm_agg_df is None or lm_agg_df.empty:
+        return pd.DataFrame(columns=ms_agg_df.columns if ms_agg_df is not None and not ms_agg_df.empty else ["MATERIAL_KEY"])
+    exact_keys = set(ms_agg_df["MATERIAL_KEY"].dropna().astype(str).tolist()) if ms_agg_df is not None and not ms_agg_df.empty and "MATERIAL_KEY" in ms_agg_df.columns else set()
+    fallback_rows = []
+    unmatched_lm_keys = [key for key in lm_agg_df["MATERIAL_KEY"].dropna().astype(str).tolist() if key not in exact_keys]
+    for lm_key in unmatched_lm_keys:
+        matched_df = ms_df[ms_df["Material Key"].apply(lambda ms_key: material_keys_match(lm_key, ms_key))].copy()
+        if matched_df.empty:
+            continue
+        matched_df["Material Key"] = lm_key
+        agg_df = aggregate_material_status(matched_df)
+        if not agg_df.empty:
+            fallback_rows.append(agg_df.iloc[0].to_dict())
+    return pd.DataFrame(fallback_rows)
 
 
 def calculate_purchase_status(row):
@@ -340,28 +383,99 @@ def calculate_delivery_status(row):
     return "Pendiente"
 
 
-def format_date_value(value):
-    date_value = pd.to_datetime(value, errors="coerce")
-    return "" if pd.isna(date_value) else date_value.strftime("%Y-%m-%d")
+def complete_cross_dataframe(cross_df):
+    for column in ["CANTIDAD PEDIDA", "Ctd. Solicitada", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "Nº PRECIOS DISTINTOS", "LINEAS MATERIAL STATUS", "LINEAS PENDIENTES VENCIDAS"]:
+        if column not in cross_df.columns:
+            cross_df[column] = 0
+        cross_df[column] = cross_df[column].fillna(0)
+    cross_df["MATERIAL_STATUS_ENCONTRADO"] = cross_df["Descripción material"].fillna("").astype(str).apply(lambda value: "SI" if value.strip() and value.strip().lower() != "nan" else "NO") if "Descripción material" in cross_df.columns else "NO"
+    cross_df["COBERTURA COMPRA"] = cross_df.apply(lambda row: row["CANTIDAD PEDIDA"] / row["CANTIDAD LM"] if row["CANTIDAD LM"] else 0.0, axis=1)
+    cross_df["ESTADO COMPRA"] = cross_df.apply(calculate_purchase_status, axis=1)
+    cross_df["ESTADO ENTREGA"] = cross_df.apply(calculate_delivery_status, axis=1)
+    cross_df["COSTE LM ESTIMADO"] = cross_df["CANTIDAD LM"] * cross_df["PRECIO UNITARIO MEDIO"]
+    for column in ["Descripción material", "Elemento PEP", "Proveedor"]:
+        if column not in cross_df.columns:
+            cross_df[column] = "NOT AVAILABLE"
+        cross_df[column] = cross_df[column].fillna("NOT AVAILABLE")
+    if "VARIOS PRECIOS" not in cross_df.columns:
+        cross_df["VARIOS PRECIOS"] = "NO"
+    cross_df["VARIOS PRECIOS"] = cross_df["VARIOS PRECIOS"].fillna("NO")
+    return cross_df
+
+
+def build_material_status_cross_for_selected_code(df, selected_code, progress_bar=None, status_box=None, force_reload=False):
+    source = get_material_status_active_source()
+    if source.get("mode") == "none":
+        empty_metrics = {"source_loaded": False, "precio_modulo": 0.0, "materiales_totales": 0, "materiales_encontrados": 0, "materiales_no_encontrados": 0, "materiales_con_precio": 0, "materiales_sin_precio": 0, "materiales_pendientes": 0, "materiales_entregados": 0, "lineas_material_status": 0}
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), empty_metrics, ["[INFO] No hay fichero Material Status cargado."]
+    if progress_bar is not None:
+        progress_bar.progress(5)
+    if status_box is not None:
+        status_box.info("Cargando LMs del elemento seleccionado...")
+    materials_df, lm_log_lines, lm_metrics, lm_file_signature = get_lm_materials_for_selected_code(df, selected_code)
+    cache_key = repr((str(selected_code), source.get("signature", ""), lm_file_signature))
+    selection_cache = st.session_state.setdefault("material_status_selection_cache", {})
+    if not force_reload and cache_key in selection_cache:
+        cached = selection_cache[cache_key]
+        return cached["cross_df"].copy(), cached["incidents_df"].copy(), cached["ms_df"].copy(), dict(cached["metrics"]), list(cached["log_lines"])
+    if progress_bar is not None:
+        progress_bar.progress(20)
+    if status_box is not None:
+        status_box.info("Agrupando materiales de LMs...")
+    lm_agg_df = aggregate_lm_materials(materials_df)
+    ms_df, ms_agg_df, ms_log_lines, source_signature = ensure_material_status_processed(progress_bar, status_box, force_reload)
+    if lm_agg_df.empty:
+        empty_metrics = {"source_loaded": True, "precio_modulo": 0.0, "materiales_totales": 0, "materiales_encontrados": 0, "materiales_no_encontrados": 0, "materiales_con_precio": 0, "materiales_sin_precio": 0, "materiales_pendientes": 0, "materiales_entregados": 0, "lineas_material_status": 0}
+        result = (pd.DataFrame(), pd.DataFrame(), ms_df, empty_metrics, lm_log_lines + ms_log_lines)
+        return result
+    if progress_bar is not None:
+        progress_bar.progress(82)
+    if status_box is not None:
+        status_box.info("Cruzando Material Status cacheado con LMs del elemento seleccionado...")
+    fallback_agg_df = build_fallback_material_status_agg(ms_df, ms_agg_df, lm_agg_df)
+    effective_ms_agg_df = pd.concat([ms_agg_df, fallback_agg_df], ignore_index=True) if fallback_agg_df is not None and not fallback_agg_df.empty else ms_agg_df.copy()
+    if effective_ms_agg_df.empty:
+        cross_df = lm_agg_df.copy()
+        cross_df["MATERIAL_STATUS_ENCONTRADO"] = "NO"
+        cross_df["COSTE LM ESTIMADO"] = 0.0
+        metrics = {"source_loaded": True, "precio_modulo": 0.0, "materiales_totales": len(cross_df), "materiales_encontrados": 0, "materiales_no_encontrados": len(cross_df), "materiales_con_precio": 0, "materiales_sin_precio": len(cross_df), "materiales_pendientes": 0, "materiales_entregados": 0, "lineas_material_status": 0}
+    else:
+        cross_df = lm_agg_df.merge(effective_ms_agg_df, on="MATERIAL_KEY", how="left")
+        cross_df = complete_cross_dataframe(cross_df)
+        metrics = {"source_loaded": True, "precio_modulo": float(cross_df["COSTE LM ESTIMADO"].sum()), "materiales_totales": int(len(cross_df)), "materiales_encontrados": int((cross_df["MATERIAL_STATUS_ENCONTRADO"] == "SI").sum()), "materiales_no_encontrados": int((cross_df["MATERIAL_STATUS_ENCONTRADO"] != "SI").sum()), "materiales_con_precio": int(((cross_df["PRECIO UNITARIO MEDIO"] > 0) & (cross_df["MATERIAL_STATUS_ENCONTRADO"] == "SI")).sum()), "materiales_sin_precio": int(((cross_df["PRECIO UNITARIO MEDIO"] <= 0) | (cross_df["MATERIAL_STATUS_ENCONTRADO"] != "SI")).sum()), "materiales_pendientes": int(cross_df["ESTADO ENTREGA"].isin(["Pendiente", "Parcial", "Retrasado"]).sum()), "materiales_entregados": int((cross_df["ESTADO ENTREGA"] == "Entregado").sum()), "lineas_material_status": int(cross_df["LINEAS MATERIAL STATUS"].sum())}
+    raw_cross_df = cross_df.copy()
+    formatted_cross_df = format_cross_table(raw_cross_df)
+    incidents_df = build_incidents_table(raw_cross_df)
+    log_lines = lm_log_lines + ms_log_lines + [f"[OK] Cruce Material Status completado para {selected_code}. Materiales LM: {metrics.get('materiales_totales', 0)}. Encontrados: {metrics.get('materiales_encontrados', 0)}. No encontrados: {metrics.get('materiales_no_encontrados', 0)}."]
+    selection_cache[cache_key] = {"cross_df": formatted_cross_df.copy(), "incidents_df": incidents_df.copy(), "ms_df": ms_df.copy(), "metrics": dict(metrics), "log_lines": list(log_lines)}
+    if progress_bar is not None:
+        progress_bar.progress(95)
+    return formatted_cross_df, incidents_df, ms_df, metrics, log_lines
 
 
 def format_cross_table(cross_df):
     if cross_df is None or cross_df.empty:
         return pd.DataFrame(columns=MATERIAL_STATUS_CROSS_COLUMNS)
     result_df = cross_df.copy()
+    result_df["Material"] = result_df["CODIGO MATERIAL"].apply(normalize_material_display) if "CODIGO MATERIAL" in result_df.columns else "NOT AVAILABLE"
+    result_df["Lista de materiales"] = result_df["LM_DOCS"].fillna("NIL").astype(str).apply(lambda value: "NIL" if value.strip() == "" or value.strip().upper() in ["NAN", "NONE", "NOT AVAILABLE"] else value.strip()) if "LM_DOCS" in result_df.columns else "NIL"
+    result_df["Desc.Proveedor"] = result_df["Proveedor"].fillna("NOT AVAILABLE") if "Proveedor" in result_df.columns else "NOT AVAILABLE"
+    result_df["Precio unitario"] = result_df["PRECIO UNITARIO MEDIO"].apply(format_currency) if "PRECIO UNITARIO MEDIO" in result_df.columns else "0,00 €"
     for column in ["PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA"]:
         if column in result_df.columns:
             result_df[column] = result_df[column].apply(format_date_value)
-    result_df["COBERTURA COMPRA"] = result_df["COBERTURA COMPRA"].apply(lambda value: format_decimal(float(value) * 100, 1) + " %")
+    if "COBERTURA COMPRA" in result_df.columns:
+        result_df["COBERTURA COMPRA"] = result_df["COBERTURA COMPRA"].apply(lambda value: format_decimal(float(value) * 100, 1) + " %")
     for column in ["PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO"]:
-        result_df[column] = result_df[column].apply(format_currency)
-    for column in ["CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE"]:
-        result_df[column] = result_df[column].apply(lambda value: format_decimal(value, 3))
+        if column in result_df.columns:
+            result_df[column] = result_df[column].apply(format_currency)
+    for column in ["CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "Ctd. Solicitada"]:
+        if column in result_df.columns:
+            result_df[column] = result_df[column].apply(lambda value: format_decimal(value, 3))
     for column in MATERIAL_STATUS_CROSS_COLUMNS:
         if column not in result_df.columns:
-            result_df[column] = "NOT AVAILABLE"
-    return result_df[MATERIAL_STATUS_CROSS_COLUMNS].fillna("NOT AVAILABLE")
-
+            result_df[column] = "NIL" if column == "Lista de materiales" else "NOT AVAILABLE"
+    return result_df[MATERIAL_STATUS_CROSS_COLUMNS].fillna({"Lista de materiales": "NIL"}).fillna("NOT AVAILABLE")
 
 def build_incidents_table(cross_df):
     rows = []
@@ -390,19 +504,57 @@ def get_material_status_metrics_for_pbs(df, selected_code):
         return {"source_loaded": bool(get_material_status_source_path()), "error": str(error), "precio_modulo": 0.0, "materiales_totales": 0, "materiales_encontrados": 0, "materiales_no_encontrados": 0, "materiales_con_precio": 0, "materiales_sin_precio": 0}
 
 
-def render_material_status_table(table_df, height=520):
+def render_material_status_table(table_df, height=520, default_visible_columns=None, grid_key="material_status_table"):
     if table_df is None or table_df.empty:
         st.info("No hay datos para mostrar.")
         return
+    default_visible_columns = default_visible_columns or list(table_df.columns)
+    hidden_columns = [column for column in table_df.columns if column not in default_visible_columns]
+    row_count = len(table_df)
+    page_size_label = st.selectbox("Page Size", options=["100", "200", "300", "Todos"], index=0, key=f"{grid_key}_page_size")
+    page_size = row_count if page_size_label == "Todos" else int(page_size_label)
+    page_size = max(1, min(page_size, row_count))
+    st.caption("Usa el panel lateral de columnas de la tabla para mostrar u ocultar campos. Click en una celda copia directamente su valor. Ordenar, filtrar y mover columnas no debe relanzar el proceso de Streamlit.")
+    numeric_comparator = JsCode("function(valueA, valueB) { function parseSpanishNumber(value) { if (value === null || value === undefined) { return 0; } let text = String(value).replace('€', '').replace('%', '').replace(/\s/g, '').trim(); if (text === '' || text.toUpperCase() === 'NOTAVAILABLE' || text.toUpperCase() === 'NOT AVAILABLE') { return 0; } text = text.replace(/\./g, '').replace(',', '.'); let number = parseFloat(text); return isNaN(number) ? 0 : number; } return parseSpanishNumber(valueA) - parseSpanishNumber(valueB); }")
+    date_comparator = JsCode("function(valueA, valueB) { function parseDate(value) { if (!value) { return 0; } let text = String(value).trim(); let parts = text.split('-'); if (parts.length === 3) { return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime(); } let dateValue = Date.parse(text); return isNaN(dateValue) ? 0 : dateValue; } return parseDate(valueA) - parseDate(valueB); }")
+    copy_cell_code = JsCode("function(params) { if (!params || params.value === null || params.value === undefined) { return; } const text = String(params.value); function fallbackCopy(value) { const area = document.createElement('textarea'); area.value = value; area.style.position = 'fixed'; area.style.left = '-9999px'; document.body.appendChild(area); area.focus(); area.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(area); } if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(function() { fallbackCopy(text); }); } else { fallbackCopy(text); } }")
+    numeric_sort_columns = ["Precio unitario", "Precio unitario real", "Importe línea calculado", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada", "Ctd. pedido", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "Nº PRECIOS DISTINTOS"]
+    date_sort_columns = ["Fecha Sol.", "Fecha Ped.", "Fe. Entrega", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA"]
     grid_builder = GridOptionsBuilder.from_dataframe(table_df)
-    grid_builder.configure_default_column(filter=True, sortable=True, resizable=True, editable=False)
+    grid_builder.configure_default_column(filter=True, sortable=True, resizable=True, editable=False, floatingFilter=True)
     for column in table_df.columns:
-        min_width = 220 if column in ["DESCRIPCION LM", "Descripción material", "Detalle", "Proveedor", "Elemento PEP", "LM_DOCS"] else 140
-        grid_builder.configure_column(column, minWidth=min_width)
-    auto_size_code = JsCode("function(params) { setTimeout(function() { params.api.autoSizeAllColumns(false); }, 500); setTimeout(function() { params.api.autoSizeAllColumns(false); }, 1200); }")
-    grid_builder.configure_grid_options(domLayout="normal", onGridReady=auto_size_code, onFirstDataRendered=auto_size_code)
-    AgGrid(table_df, gridOptions=grid_builder.build(), height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True)
-
+        min_width = 240 if column in ["DESCRIPCION LM", "Descripción material", "Detalle", "Proveedor", "Desc.Proveedor", "Elemento PEP", "LM_DOCS", "Lista de materiales"] else 150
+        if column in numeric_sort_columns:
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=numeric_comparator, filter="agNumberColumnFilter")
+        elif column in date_sort_columns:
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=date_comparator, filter="agDateColumnFilter")
+        else:
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns)
+    grid_options = grid_builder.build()
+    grid_options["sideBar"] = {"toolPanels": ["columns"], "defaultToolPanel": ""}
+    grid_options["suppressRowClickSelection"] = True
+    grid_options["suppressCellFocus"] = False
+    grid_options["enableCellTextSelection"] = True
+    grid_options["ensureDomOrder"] = True
+    grid_options["suppressClipboardPaste"] = True
+    grid_options["readOnlyEdit"] = True
+    grid_options["singleClickEdit"] = False
+    grid_options["suppressClickEdit"] = True
+    grid_options["stopEditingWhenCellsLoseFocus"] = True
+    grid_options["maintainColumnOrder"] = True
+    grid_options["animateRows"] = False
+    grid_options["rowBuffer"] = 10
+    grid_options["pagination"] = True
+    grid_options["paginationPageSize"] = page_size
+    grid_options["paginationPageSizeSelector"] = [100, 200, 300, row_count]
+    grid_options["suppressPaginationPanel"] = False
+    grid_options["suppressScrollOnNewData"] = True
+    grid_options["domLayout"] = "normal"
+    grid_options["onCellClicked"] = copy_cell_code
+    try:
+        AgGrid(table_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False, update_on=[])
+    except TypeError:
+        AgGrid(table_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False)
 
 def render_material_status_source_selector():
     st.markdown("### Fichero Material Status")
@@ -417,6 +569,9 @@ def render_material_status_source_selector():
             st.session_state["material_status_uploaded_bytes"] = file_bytes
             st.session_state["material_status_uploaded_size"] = len(file_bytes)
             st.session_state["material_status_loaded_at"] = pd.Timestamp.now().isoformat()
+            st.session_state.pop("material_status_active_signature", None)
+            st.session_state.pop("material_status_processed_signature", None)
+            clear_material_status_selection_cache()
     source_name = get_material_status_source_path()
     if not source_name:
         st.warning("Busca un fichero Excel de Material Status y pulsa Cargar Material Status para cruzar precios, pedidos y entregas.")
@@ -437,22 +592,94 @@ def render_material_status_metrics(metrics):
     col6.metric("Sin precio", metrics.get("materiales_sin_precio", 0))
 
 
-def build_material_status_detail_table(ms_df):
+def build_material_status_detail_table(ms_df, cross_df=None):
     if ms_df is None or ms_df.empty:
         return pd.DataFrame(columns=MATERIAL_STATUS_DETAIL_COLUMNS)
     result_df = ms_df.copy()
+    if cross_df is not None and not cross_df.empty and "CODIGO MATERIAL" in cross_df.columns:
+        material_keys = set([normalize_material_key(value) for value in cross_df["CODIGO MATERIAL"].tolist() if normalize_material_key(value)])
+        if "Material Key" in result_df.columns:
+            exact_mask = result_df["Material Key"].astype(str).isin(material_keys)
+            fallback_keys = [key for key in material_keys if key not in set(result_df.loc[exact_mask, "Material Key"].astype(str).tolist())]
+            fallback_mask = result_df["Material Key"].apply(lambda ms_key: any(material_keys_match(lm_key, ms_key) for lm_key in fallback_keys)) if fallback_keys else pd.Series([False] * len(result_df), index=result_df.index)
+            result_df = result_df[exact_mask | fallback_mask].copy()
+    if result_df.empty:
+        return pd.DataFrame(columns=MATERIAL_STATUS_DETAIL_COLUMNS)
     result_df["Precio unitario real"] = result_df["Precio unitario real"].apply(format_currency)
     result_df["Importe línea calculado"] = result_df["Importe línea calculado"].apply(format_currency)
     for column in MATERIAL_STATUS_DATE_COLUMNS:
         if f"{column} Date" in result_df.columns:
             result_df[column] = result_df[f"{column} Date"].apply(format_date_value)
-    for column in ["Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped."]:
+    for column in ["Ctd. Solicitada", "Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped."]:
         if column in result_df.columns:
             result_df[column] = result_df[column].fillna("NOT AVAILABLE").astype(str)
     for column in MATERIAL_STATUS_DETAIL_COLUMNS:
         if column not in result_df.columns:
             result_df[column] = "NOT AVAILABLE"
     return result_df[MATERIAL_STATUS_DETAIL_COLUMNS].fillna("NOT AVAILABLE")
+
+
+def get_material_status_detail_table_cached(selected_code, ms_df, cross_df):
+    if ms_df is None or ms_df.empty:
+        return pd.DataFrame(columns=MATERIAL_STATUS_DETAIL_COLUMNS)
+    source = get_material_status_active_source()
+    material_keys = tuple(sorted(set([normalize_material_key(value) for value in cross_df["CODIGO MATERIAL"].tolist() if normalize_material_key(value)]))) if cross_df is not None and not cross_df.empty and "CODIGO MATERIAL" in cross_df.columns else tuple()
+    cache_key = repr((str(selected_code), source.get("signature", ""), material_keys))
+    detail_cache = st.session_state.setdefault("material_status_detail_cache", {})
+    if cache_key in detail_cache:
+        return detail_cache[cache_key].copy()
+    detail_df = build_material_status_detail_table(ms_df, cross_df)
+    detail_cache[cache_key] = detail_df.copy()
+    return detail_df
+
+
+def get_export_csv_bytes(table_df):
+    if table_df is None or table_df.empty:
+        return "".encode("utf-8-sig")
+    export_df = table_df.fillna("NOT AVAILABLE").astype(str).copy()
+    for column in ["CODIGO MATERIAL", "Material"]:
+        if column in export_df.columns:
+            export_df[column] = export_df[column].apply(format_material_for_excel_csv)
+    return export_df.to_csv(index=False, sep=";").encode("utf-8-sig")
+
+
+def is_not_available_value(value):
+    text = str(value).strip().upper()
+    return text in ["", "NAN", "NONE", "NOT AVAILABLE"]
+
+
+def build_material_status_summary_export_tables(cross_df, detail_df):
+    safe_cross_df = cross_df.copy() if cross_df is not None else pd.DataFrame()
+    safe_detail_df = detail_df.copy() if detail_df is not None else pd.DataFrame()
+    if safe_cross_df.empty:
+        return {"materiales_totales_lms": pd.DataFrame(), "materiales_encontrados_ms": pd.DataFrame(), "materiales_no_encontrados_ms": pd.DataFrame(), "materiales_con_precio": pd.DataFrame(), "materiales_sin_precio": pd.DataFrame(), "materiales_pendientes": pd.DataFrame(), "materiales_entregados": pd.DataFrame(), "lineas_material_status_usadas": safe_detail_df}
+    found_mask = ~safe_cross_df["Descripción material"].apply(is_not_available_value) if "Descripción material" in safe_cross_df.columns else pd.Series([False] * len(safe_cross_df), index=safe_cross_df.index)
+    price_mask = safe_cross_df["PRECIO UNITARIO MEDIO"].apply(lambda value: parse_number(value) > 0) if "PRECIO UNITARIO MEDIO" in safe_cross_df.columns else pd.Series([False] * len(safe_cross_df), index=safe_cross_df.index)
+    delivery_mask = safe_cross_df["ESTADO ENTREGA"].isin(["Pendiente", "Parcial", "Retrasado"]) if "ESTADO ENTREGA" in safe_cross_df.columns else pd.Series([False] * len(safe_cross_df), index=safe_cross_df.index)
+    delivered_mask = safe_cross_df["ESTADO ENTREGA"].eq("Entregado") if "ESTADO ENTREGA" in safe_cross_df.columns else pd.Series([False] * len(safe_cross_df), index=safe_cross_df.index)
+    return {"materiales_totales_lms": safe_cross_df.copy(), "materiales_encontrados_ms": safe_cross_df[found_mask].copy(), "materiales_no_encontrados_ms": safe_cross_df[~found_mask].copy(), "materiales_con_precio": safe_cross_df[found_mask & price_mask].copy(), "materiales_sin_precio": safe_cross_df[(~found_mask) | (~price_mask)].copy(), "materiales_pendientes": safe_cross_df[delivery_mask].copy(), "materiales_entregados": safe_cross_df[delivered_mask].copy(), "lineas_material_status_usadas": safe_detail_df.copy()}
+
+
+def render_summary_download_line(label, value, table_df, file_suffix, selected_code):
+    col_text, col_button = st.columns([4, 1])
+    col_text.markdown(f"**{label}:** {value}")
+    disabled = table_df is None or table_df.empty
+    csv_bytes = get_export_csv_bytes(table_df)
+    col_button.download_button("Exportar CSV", data=csv_bytes, file_name=f"Material_Status_{selected_code}_{file_suffix}.csv", mime="text/csv", disabled=disabled, key=f"download_material_status_summary_{selected_code}_{file_suffix}")
+
+
+def render_material_status_summary(metrics, cross_df, detail_df, selected_code):
+    st.info("El coste del módulo se calcula cruzando CODIGO MATERIAL de las LMs contra Material del fichero Material Status y usando CANTIDAD LM * Precio unitario real.")
+    export_tables = build_material_status_summary_export_tables(cross_df, detail_df)
+    st.markdown(f"**Precio por módulo:** {format_currency(metrics.get('precio_modulo', 0))}")
+    render_summary_download_line("Materiales totales en LMs", metrics.get("materiales_totales", 0), export_tables.get("materiales_totales_lms", pd.DataFrame()), "materiales_totales_lms", selected_code)
+    render_summary_download_line("Materiales encontrados en Material Status", metrics.get("materiales_encontrados", 0), export_tables.get("materiales_encontrados_ms", pd.DataFrame()), "materiales_encontrados_ms", selected_code)
+    render_summary_download_line("Materiales no encontrados en Material Status", metrics.get("materiales_no_encontrados", 0), export_tables.get("materiales_no_encontrados_ms", pd.DataFrame()), "materiales_no_encontrados_ms", selected_code)
+    render_summary_download_line("Materiales con precio", metrics.get("materiales_con_precio", 0), export_tables.get("materiales_con_precio", pd.DataFrame()), "materiales_con_precio", selected_code)
+    render_summary_download_line("Materiales sin precio", metrics.get("materiales_sin_precio", 0), export_tables.get("materiales_sin_precio", pd.DataFrame()), "materiales_sin_precio", selected_code)
+    render_summary_download_line("Materiales pendientes/parciales/retrasados", metrics.get("materiales_pendientes", 0), export_tables.get("materiales_pendientes", pd.DataFrame()), "materiales_pendientes_parciales_retrasados", selected_code)
+    render_summary_download_line("Materiales entregados", metrics.get("materiales_entregados", 0), export_tables.get("materiales_entregados", pd.DataFrame()), "materiales_entregados", selected_code)
+    render_summary_download_line("Líneas Material Status usadas", metrics.get("lineas_material_status", 0), export_tables.get("lineas_material_status_usadas", pd.DataFrame()), "lineas_material_status_usadas", selected_code)
 
 
 def render_material_status_log(log_lines):
@@ -475,12 +702,8 @@ def render_material_status_log(log_lines):
         level_counts[detected_level] += 1
         if detected_level in selected_levels:
             filtered_log_lines.append(line_text)
-    summary_text = " | ".join([f"{level}: {level_counts.get(level, 0)}" for level in available_levels])
-    st.caption(summary_text)
-    if not filtered_log_lines:
-        st.text_area("Detalle", value="No hay mensajes para los tipos seleccionados.", height=220, disabled=True)
-        return
-    st.text_area("Detalle", value="\n".join(filtered_log_lines), height=220, disabled=True)
+    st.caption(" | ".join([f"{level}: {level_counts.get(level, 0)}" for level in available_levels]))
+    st.text_area("Detalle", value="\n".join(filtered_log_lines) if filtered_log_lines else "No hay mensajes para los tipos seleccionados.", height=220, disabled=True)
 
 
 def render_material_status(df, selected_code):
@@ -494,27 +717,28 @@ def render_material_status(df, selected_code):
     source_name, load_clicked = render_material_status_source_selector()
     if not source_name:
         return
+    active_view = st.radio("Vista Material Status", options=["Resumen", "Materiales del elemento", "Detalle SAP", "Incidencias", "Log de carga"], horizontal=True, label_visibility="collapsed", key="material_status_active_view")
     if load_clicked:
         progress_bar = st.progress(0)
         status_box = st.empty()
         status_box.info("Iniciando carga de Material Status...")
-        cross_df, incidents_df, ms_df, metrics, log_lines = build_material_status_cross_for_selected_code(df, selected_code, progress_bar, status_box)
+        cross_df, incidents_df, ms_df, metrics, log_lines = build_material_status_cross_for_selected_code(df, selected_code, progress_bar, status_box, True)
         progress_bar.progress(100)
-        status_box.success("Material Status cargado y cruzado correctamente.")
+        status_box.success("Material Status cargado, cacheado y cruzado correctamente.")
     else:
-        with st.spinner("Cruzando LMs con Material Status..."):
-            cross_df, incidents_df, ms_df, metrics, log_lines = build_material_status_cross_for_selected_code(df, selected_code)
+        cross_df, incidents_df, ms_df, metrics, log_lines = build_material_status_cross_for_selected_code(df, selected_code)
     render_material_status_metrics(metrics)
-    st.caption("El coste del módulo se calcula cruzando CODIGO MATERIAL de las LMs contra Material del fichero Material Status y usando CANTIDAD LM * Precio unitario real.")
-    tab_summary, tab_materials, tab_detail, tab_incidents, tab_log = st.tabs(["Resumen", "Materiales del elemento", "Detalle SAP", "Incidencias", "Log de carga"])
-    with tab_summary:
-        summary_rows = [{"Concepto": "Precio por módulo", "Valor": format_currency(metrics.get("precio_modulo", 0))}, {"Concepto": "Materiales totales en LMs", "Valor": metrics.get("materiales_totales", 0)}, {"Concepto": "Materiales encontrados en Material Status", "Valor": metrics.get("materiales_encontrados", 0)}, {"Concepto": "Materiales no encontrados en Material Status", "Valor": metrics.get("materiales_no_encontrados", 0)}, {"Concepto": "Materiales con precio", "Valor": metrics.get("materiales_con_precio", 0)}, {"Concepto": "Materiales sin precio", "Valor": metrics.get("materiales_sin_precio", 0)}, {"Concepto": "Materiales pendientes/parciales/retrasados", "Valor": metrics.get("materiales_pendientes", 0)}, {"Concepto": "Materiales entregados", "Valor": metrics.get("materiales_entregados", 0)}, {"Concepto": "Líneas Material Status usadas", "Valor": metrics.get("lineas_material_status", 0)}]
-        st.dataframe(style_dark_dataframe(pd.DataFrame(summary_rows)), width="stretch", hide_index=True)
-    with tab_materials:
-        render_material_status_table(cross_df, 560)
-    with tab_detail:
-        render_material_status_table(build_material_status_detail_table(ms_df), 560)
-    with tab_incidents:
-        render_material_status_table(incidents_df, 520)
-    with tab_log:
+    if active_view == "Resumen":
+        detail_df = get_material_status_detail_table_cached(selected_code_value, ms_df, cross_df)
+        metrics["lineas_material_status"] = len(detail_df)
+        render_material_status_summary(metrics, cross_df, detail_df, selected_code_value)
+    elif active_view == "Materiales del elemento":
+        render_material_status_table(cross_df, 560, MATERIALS_ELEMENT_DEFAULT_COLUMNS, f"material_status_materials_{selected_code_value}")
+    elif active_view == "Detalle SAP":
+        detail_df = get_material_status_detail_table_cached(selected_code_value, ms_df, cross_df)
+        metrics["lineas_material_status"] = len(detail_df)
+        render_material_status_table(detail_df, 560, MATERIAL_STATUS_DETAIL_DEFAULT_COLUMNS, f"material_status_detail_{selected_code_value}")
+    elif active_view == "Incidencias":
+        render_material_status_table(incidents_df, 520, MATERIAL_STATUS_INCIDENTS_DEFAULT_COLUMNS, f"material_status_incidents_{selected_code_value}")
+    elif active_view == "Log de carga":
         render_material_status_log(log_lines)
