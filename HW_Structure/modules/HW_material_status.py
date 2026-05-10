@@ -15,8 +15,8 @@ MATERIAL_STATUS_OPTIONAL_COLUMNS = ["Posición sol.", "Posición ped.", "Desc.Pr
 MATERIAL_STATUS_NUMERIC_COLUMNS = ["Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada"]
 MATERIAL_STATUS_DATE_COLUMNS = ["Fecha Sol.", "Fecha Ped.", "Fe. Entrega"]
 MATERIAL_STATUS_DETAIL_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Almacen", "Imp. unitario Ped.", "Cant Base Ped.", "Precio unitario real", "Importe línea calculado", "Estado entrega"]
-MATERIAL_STATUS_CROSS_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
-MATERIALS_ELEMENT_DEFAULT_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario"]
+MATERIAL_STATUS_CROSS_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
+MATERIALS_ELEMENT_DEFAULT_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total"]
 MATERIAL_STATUS_DETAIL_DEFAULT_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Precio unitario real"]
 MATERIAL_STATUS_INCIDENTS_DEFAULT_COLUMNS = ["CODIGO MATERIAL", "Incidencia", "Detalle", "Prioridad"]
 
@@ -461,6 +461,7 @@ def format_cross_table(cross_df):
     result_df["Lista de materiales"] = result_df["LM_DOCS"].fillna("NIL").astype(str).apply(lambda value: "NIL" if value.strip() == "" or value.strip().upper() in ["NAN", "NONE", "NOT AVAILABLE"] else value.strip()) if "LM_DOCS" in result_df.columns else "NIL"
     result_df["Desc.Proveedor"] = result_df["Proveedor"].fillna("NOT AVAILABLE") if "Proveedor" in result_df.columns else "NOT AVAILABLE"
     result_df["Precio unitario"] = result_df["PRECIO UNITARIO MEDIO"].apply(format_currency) if "PRECIO UNITARIO MEDIO" in result_df.columns else "0,00 €"
+    result_df["Precio total"] = result_df["COSTE PEDIDO"].apply(format_currency) if "COSTE PEDIDO" in result_df.columns else "0,00 €"
     for column in ["PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA"]:
         if column in result_df.columns:
             result_df[column] = result_df[column].apply(format_date_value)
@@ -504,7 +505,7 @@ def get_material_status_metrics_for_pbs(df, selected_code):
         return {"source_loaded": bool(get_material_status_source_path()), "error": str(error), "precio_modulo": 0.0, "materiales_totales": 0, "materiales_encontrados": 0, "materiales_no_encontrados": 0, "materiales_con_precio": 0, "materiales_sin_precio": 0}
 
 
-def render_material_status_table(table_df, height=520, default_visible_columns=None, grid_key="material_status_table"):
+def render_material_status_table(table_df, height=520, default_visible_columns=None, grid_key="material_status_table", limit_rows_by_page_size=False):
     if table_df is None or table_df.empty:
         st.info("No hay datos para mostrar.")
         return
@@ -514,22 +515,40 @@ def render_material_status_table(table_df, height=520, default_visible_columns=N
     page_size_label = st.selectbox("Page Size", options=["100", "200", "300", "Todos"], index=0, key=f"{grid_key}_page_size")
     page_size = row_count if page_size_label == "Todos" else int(page_size_label)
     page_size = max(1, min(page_size, row_count))
+    display_df = table_df.copy()
+    default_sort_candidates_for_df = ["Precio unitario", "Precio unitario real", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "Importe línea calculado"]
+    default_sort_column_for_df = next((column for column in default_sort_candidates_for_df if column in display_df.columns), "")
+    if default_sort_column_for_df:
+        display_df = display_df.copy()
+        display_df["__material_status_sort_value"] = display_df[default_sort_column_for_df].apply(parse_number)
+        display_df = display_df.sort_values("__material_status_sort_value", ascending=False).drop(columns=["__material_status_sort_value"], errors="ignore").reset_index(drop=True)
+    if limit_rows_by_page_size and page_size_label != "Todos":
+        display_df = display_df.head(page_size).copy()
+    elif limit_rows_by_page_size:
+        display_df = display_df.copy()
+    loaded_count = len(display_df)
+    if limit_rows_by_page_size and loaded_count < row_count:
+        st.caption(f"Mostrando {loaded_count} de {row_count} registros. Cambia Page Size a 200, 300 o Todos para cargar más registros en la tabla.")
     st.caption("Usa el panel lateral de columnas de la tabla para mostrar u ocultar campos. Click en una celda copia directamente su valor. Ordenar, filtrar y mover columnas no debe relanzar el proceso de Streamlit.")
     numeric_comparator = JsCode("function(valueA, valueB) { function parseSpanishNumber(value) { if (value === null || value === undefined) { return 0; } let text = String(value).replace('€', '').replace('%', '').replace(/\s/g, '').trim(); if (text === '' || text.toUpperCase() === 'NOTAVAILABLE' || text.toUpperCase() === 'NOT AVAILABLE') { return 0; } text = text.replace(/\./g, '').replace(',', '.'); let number = parseFloat(text); return isNaN(number) ? 0 : number; } return parseSpanishNumber(valueA) - parseSpanishNumber(valueB); }")
     date_comparator = JsCode("function(valueA, valueB) { function parseDate(value) { if (!value) { return 0; } let text = String(value).trim(); let parts = text.split('-'); if (parts.length === 3) { return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime(); } let dateValue = Date.parse(text); return isNaN(dateValue) ? 0 : dateValue; } return parseDate(valueA) - parseDate(valueB); }")
     copy_cell_code = JsCode("function(params) { if (!params || params.value === null || params.value === undefined) { return; } const text = String(params.value); function fallbackCopy(value) { const area = document.createElement('textarea'); area.value = value; area.style.position = 'fixed'; area.style.left = '-9999px'; document.body.appendChild(area); area.focus(); area.select(); try { document.execCommand('copy'); } catch (e) {} document.body.removeChild(area); } if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(function() { fallbackCopy(text); }); } else { fallbackCopy(text); } }")
-    numeric_sort_columns = ["Precio unitario", "Precio unitario real", "Importe línea calculado", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada", "Ctd. pedido", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "Nº PRECIOS DISTINTOS"]
+    numeric_sort_columns = ["Precio unitario", "Precio total", "Precio unitario real", "Importe línea calculado", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada", "Ctd. pedido", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "Nº PRECIOS DISTINTOS"]
     date_sort_columns = ["Fecha Sol.", "Fecha Ped.", "Fe. Entrega", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA"]
-    grid_builder = GridOptionsBuilder.from_dataframe(table_df)
+    grid_builder = GridOptionsBuilder.from_dataframe(display_df)
     grid_builder.configure_default_column(filter=True, sortable=True, resizable=True, editable=False, floatingFilter=True)
-    for column in table_df.columns:
+    default_sort_candidates = ["Precio unitario", "Precio unitario real", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "Importe línea calculado"]
+    default_sort_column = next((column for column in default_sort_candidates if column in display_df.columns), "")
+    for column in display_df.columns:
         min_width = 240 if column in ["DESCRIPCION LM", "Descripción material", "Detalle", "Proveedor", "Desc.Proveedor", "Elemento PEP", "LM_DOCS", "Lista de materiales"] else 150
+        sort_value = "desc" if column == default_sort_column else None
+        sort_index_value = 0 if column == default_sort_column else None
         if column in numeric_sort_columns:
-            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=numeric_comparator, filter="agNumberColumnFilter")
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=numeric_comparator, filter="agNumberColumnFilter", sort=sort_value, sortIndex=sort_index_value)
         elif column in date_sort_columns:
-            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=date_comparator, filter="agDateColumnFilter")
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, comparator=date_comparator, filter="agDateColumnFilter", sort=sort_value, sortIndex=sort_index_value)
         else:
-            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns)
+            grid_builder.configure_column(column, minWidth=min_width, width=min_width, hide=column in hidden_columns, sort=sort_value, sortIndex=sort_index_value)
     grid_options = grid_builder.build()
     grid_options["sideBar"] = {"toolPanels": ["columns"], "defaultToolPanel": ""}
     grid_options["suppressRowClickSelection"] = True
@@ -546,15 +565,15 @@ def render_material_status_table(table_df, height=520, default_visible_columns=N
     grid_options["rowBuffer"] = 10
     grid_options["pagination"] = True
     grid_options["paginationPageSize"] = page_size
-    grid_options["paginationPageSizeSelector"] = [100, 200, 300, row_count]
+    grid_options["paginationPageSizeSelector"] = [100, 200, 300, loaded_count]
     grid_options["suppressPaginationPanel"] = False
     grid_options["suppressScrollOnNewData"] = True
     grid_options["domLayout"] = "normal"
     grid_options["onCellClicked"] = copy_cell_code
     try:
-        AgGrid(table_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False, update_on=[])
+        AgGrid(display_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False, update_on=[])
     except TypeError:
-        AgGrid(table_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False)
+        AgGrid(display_df, gridOptions=grid_options, height=height, fit_columns_on_grid_load=False, allow_unsafe_jscode=True, key=grid_key, update_mode=GridUpdateMode.NO_UPDATE, data_return_mode=DataReturnMode.AS_INPUT, reload_data=False, try_to_convert_back_to_original_types=False)
 
 def render_material_status_source_selector():
     st.markdown("### Fichero Material Status")
@@ -733,7 +752,7 @@ def render_material_status(df, selected_code):
         metrics["lineas_material_status"] = len(detail_df)
         render_material_status_summary(metrics, cross_df, detail_df, selected_code_value)
     elif active_view == "Materiales del elemento":
-        render_material_status_table(cross_df, 560, MATERIALS_ELEMENT_DEFAULT_COLUMNS, f"material_status_materials_{selected_code_value}")
+        render_material_status_table(cross_df, 560, MATERIALS_ELEMENT_DEFAULT_COLUMNS, f"material_status_materials_{selected_code_value}", True)
     elif active_view == "Detalle SAP":
         detail_df = get_material_status_detail_table_cached(selected_code_value, ms_df, cross_df)
         metrics["lineas_material_status"] = len(detail_df)
