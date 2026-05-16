@@ -215,14 +215,12 @@ def read_best_lm_sheet(path):
 def read_lm_file_cached(file_path, lm_code, revision_label, relative_path, file_mtime_ns, file_size):
     log_lines = []
     log_prefix = f"{lm_code} {revision_label} | {relative_path}"
-    
     raw_df, header_row, read_error = read_best_lm_sheet(file_path)
     if raw_df is None or header_row is None:
         error_message = read_error if read_error else "No se ha podido detectar una hoja válida o cabecera de LM."
         log_lines.append(f"[ERROR] {log_prefix} | {error_message}")
         empty_df = pd.DataFrame(columns=["LM DOC", "Edición", "Origen fichero"] + LM_COLUMNS)
         return empty_df, log_lines
-    
     log_lines.append(f"[OK] {log_prefix} | Hoja válida detectada. Fila cabecera: {header_row + 1}.")
     headers = [normalize_lm_header(value) for value in raw_df.iloc[header_row].tolist()]
     data_df = raw_df.iloc[header_row + 1:].copy()
@@ -240,9 +238,14 @@ def read_lm_file_cached(file_path, lm_code, revision_label, relative_path, file_
         for column in dict.fromkeys(duplicated_columns):
             same_columns_df = data_df.loc[:, data_df.columns == column]
             if same_columns_df.shape[1] == 1:
-                compact_df[column] = same_columns_df.iloc[:, 0]
+                compact_df[column] = same_columns_df.iloc[:, 0].astype("object")
             else:
-                compact_df[column] = same_columns_df.bfill(axis=1).iloc[:, 0]
+                merged_series = same_columns_df.iloc[:, 0].astype("object")
+                for column_index in range(1, same_columns_df.shape[1]):
+                    candidate_series = same_columns_df.iloc[:, column_index].astype("object")
+                    missing_mask = merged_series.isna() | (merged_series.astype("string").str.strip() == "")
+                    merged_series = merged_series.mask(missing_mask, candidate_series)
+                compact_df[column] = merged_series.astype("object")
         data_df = compact_df.copy()
     available_columns = [column for column in LM_COLUMNS if column in data_df.columns]
     missing_columns = [column for column in LM_COLUMNS if column not in data_df.columns]
