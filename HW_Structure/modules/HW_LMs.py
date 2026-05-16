@@ -418,6 +418,46 @@ def render_lm_materials_table(materials_df):
     grid_options = grid_builder.build()
     AgGrid(materials_df, gridOptions=grid_options, height=520, fit_columns_on_grid_load=False, allow_unsafe_jscode=True)
 
+def normalize_lm_material_key(value):
+    if value is None:
+        return ""
+    text = str(value).replace("\xa0", " ").strip().upper()
+    if text.lower() in ["", "nan", "none", "not available"]:
+        return ""
+    while text.startswith("'"):
+        text = text[1:].strip()
+    text = re.sub(r"\s+", "", text)
+    text = text.replace(",", ".")
+    if re.match(r"^\d+\.00$", text):
+        return text.split(".", 1)[0]
+    if re.match(r"^\d+\.0$", text):
+        return text.split(".", 1)[0]
+    return text
+
+
+def get_lm_unique_material_count(materials_df):
+    if materials_df is None or materials_df.empty or "CODIGO MATERIAL" not in materials_df.columns:
+        return 0
+    material_keys = materials_df["CODIGO MATERIAL"].apply(normalize_lm_material_key)
+    material_keys = material_keys[material_keys != ""]
+    return int(material_keys.nunique())
+
+
+def render_lm_summary_metrics(materials_df, metrics):
+    unique_materials = get_lm_unique_material_count(materials_df)
+    duplicate_lines = max(int(len(materials_df)) - unique_materials, 0)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("Listas detectadas", metrics.get("total_lm_files", 0))
+    col2.metric("Listas cargadas", metrics.get("loaded_lm_files", 0))
+    col3.metric("Listas no cargadas", metrics.get("unreadable_lm_files", 0))
+    col4.metric("Líneas materiales", len(materials_df))
+    col5.metric("Materiales únicos", unique_materials)
+    col6.metric("Líneas duplicadas", duplicate_lines)
+    col7, col8, col9 = st.columns(3)
+    col7.metric("Campos obligatorios incompletos", metrics.get("materials_with_missing_required", 0))
+    col8.metric("Registros NOT AVAILABLE", metrics.get("export_missing_count", 0))
+    col9.metric("Ediciones cargadas", metrics.get("loaded_lm_files", 0))
+
 def render_lm_read_log(log_lines):
     st.markdown("### Log de lectura y fusión de LMs")
     available_levels = ["OK", "INFO", "WARNING", "ERROR"]
@@ -462,8 +502,9 @@ def render_lms(df, selected_code):
         st.subheader("Elemento HW Sin Lista de Materiales")
         render_lm_read_log(read_log_lines)
         return
+    render_lm_summary_metrics(materials_df, metrics)
     info_col, export_errors_col, export_table_col = st.columns([5, 1, 1])
-    info_col.caption(f"{metrics['total_lm_files']} listas de materiales encontradas. {metrics['loaded_lm_files']} listas cargadas correctamente. {metrics['unreadable_lm_files']} listas no cargadas. {len(materials_df)} materiales cargados. {metrics['materials_with_missing_required']} materiales cargados sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {metrics['export_missing_count']} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
+    info_col.caption(f"{metrics['total_lm_files']} listas de materiales encontradas. {metrics['loaded_lm_files']} listas cargadas correctamente. {metrics['unreadable_lm_files']} listas no cargadas. {len(materials_df)} líneas de materiales cargadas. {get_lm_unique_material_count(materials_df)} materiales únicos detectados. {metrics['materials_with_missing_required']} líneas cargadas sin alguno de estos campos: CODIGO MATERIAL, CANTIDAD, REF.TOP., UNIDAD. {metrics['export_missing_count']} registros cargados tienen CODIGO MATERIAL, DESCRIPCION, LM_DOC o EDICION en NOT AVAILABLE. Si existen varias ediciones de una misma lista, solo se carga la más actualizada.")
     if metrics["export_missing_count"] > 0:
         export_csv = export_missing_df.to_csv(index=False, sep=";").encode("utf-8-sig")
         export_errors_col.download_button("Exportar errores CSV", data=export_csv, file_name=f"LMs_{selected_code_value}_registros_not_available.csv", mime="text/csv", key=f"download_lm_missing_priority_{selected_code_value}")

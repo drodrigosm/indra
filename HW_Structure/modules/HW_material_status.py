@@ -14,10 +14,10 @@ MATERIAL_STATUS_REQUIRED_COLUMNS = ["Material", "Descripción material", "Nº Ce
 MATERIAL_STATUS_OPTIONAL_COLUMNS = ["Posición sol.", "Posición ped.", "Desc.Proveedor", "Solic.", "Comprador", "Ctd. Solicitada", "Ctd. por recepcionar", "Ctd. Aceptada", "Ctd. Rechazada", "Imp.total pos SP", "Centro", "Almacen", "Estado", "Moneda Ped.", "Unidad", "Tipo Compra"]
 MATERIAL_STATUS_NUMERIC_COLUMNS = ["Ctd. pedido", "Imp. unitario Ped.", "Cant Base Ped.", "Ctd. Solicitada"]
 MATERIAL_STATUS_DATE_COLUMNS = ["Fecha Sol.", "Fecha Ped.", "Fe. Entrega"]
-MATERIAL_STATUS_DETAIL_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Almacen", "Imp. unitario Ped.", "Cant Base Ped.", "Precio unitario real", "Importe línea calculado", "Estado entrega"]
-MATERIAL_STATUS_CROSS_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
-MATERIALS_ELEMENT_DEFAULT_COLUMNS = ["Material", "Lista de materiales", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total"]
-MATERIAL_STATUS_DETAIL_DEFAULT_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Precio unitario real"]
+MATERIAL_STATUS_DETAIL_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Tipo pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Almacen", "Imp. unitario Ped.", "Cant Base Ped.", "Precio unitario real", "Importe línea calculado", "Estado entrega"]
+MATERIAL_STATUS_CROSS_COLUMNS = ["Material", "Lista de materiales", "Tipo pedido", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total", "CODIGO MATERIAL", "DESCRIPCION LM", "CANTIDAD LM", "CANTIDAD PEDIDA", "CANTIDAD ENTREGADA", "CANTIDAD PENDIENTE", "COBERTURA COMPRA", "ESTADO COMPRA", "ESTADO ENTREGA", "PRECIO UNITARIO MEDIO", "PRECIO UNITARIO ULTIMO", "COSTE LM ESTIMADO", "COSTE PEDIDO", "Nº PEDIDOS", "Nº CESTAS/SOLPEDS", "PRIMERA FECHA SOL.", "ULTIMA FECHA PED.", "FECHA ENTREGA PROXIMA", "FECHA ENTREGA ULTIMA", "Elemento PEP", "Proveedor", "VARIOS PRECIOS", "Nº PRECIOS DISTINTOS", "LM_DOCS"]
+MATERIALS_ELEMENT_DEFAULT_COLUMNS = ["Material", "Lista de materiales", "Tipo pedido", "Descripción material", "Desc.Proveedor", "Ctd. Solicitada", "Precio unitario", "Precio total"]
+MATERIAL_STATUS_DETAIL_DEFAULT_COLUMNS = ["Material", "Descripción material", "Nº Cesta / Sol", "Fecha Sol.", "Nº pedido", "Tipo pedido", "Fecha Ped.", "Elemento PEP", "Desc.Proveedor", "Fe. Entrega", "Ctd. Solicitada", "Ctd. pedido", "Entrega final", "Precio unitario real"]
 MATERIAL_STATUS_INCIDENTS_DEFAULT_COLUMNS = ["CODIGO MATERIAL", "Incidencia", "Detalle", "Prioridad"]
 
 
@@ -25,6 +25,22 @@ def normalize_column_name(value):
     text = "" if value is None else str(value)
     text = text.replace("\xa0", " ")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_purchase_order_prefix(value):
+    text = "" if value is None else str(value).replace("\xa0", " ").strip()
+    if text.lower() in ["", "nan", "none", "not available"]:
+        return ""
+    digits = re.sub(r"\D", "", text)
+    return digits[:2] if len(digits) >= 2 else ""
+
+
+def classify_purchase_order_type(value):
+    prefix = normalize_purchase_order_prefix(value)
+    order_types = {"46": "PO Hitos", "42": "PO Materiales", "43": "PO Servicios", "41": "PO Inversión", "48": "PO Punchout", "44": "PO Servicios Abiertos", "45": "PO Leasing"}
+    if not prefix:
+        return "NOT AVAILABLE"
+    return order_types.get(prefix, "Otros")
 
 
 def clean_material_text(value):
@@ -233,6 +249,7 @@ def prepare_material_status_dataframe(raw_df, source_label, log_lines):
     result_df = raw_df.copy()
     result_df["Material Key"] = result_df["Material"].apply(normalize_material_key)
     result_df["Material"] = result_df["Material"].apply(normalize_material_display)
+    result_df["Tipo pedido"] = result_df["Nº pedido"].apply(classify_purchase_order_type)
     result_df = result_df[result_df["Material Key"] != ""].copy()
     for column in MATERIAL_STATUS_NUMERIC_COLUMNS:
         result_df[f"{column} Num"] = result_df[column].apply(parse_number)
@@ -329,7 +346,7 @@ def aggregate_material_status(ms_df):
         pending_dates = pending_group.dropna(subset=["Fe. Entrega Date"])["Fe. Entrega Date"].tolist()
         next_delivery = min([date for date in pending_dates if date >= today], default=pd.NaT)
         overdue_count = int(len(pending_group[pending_group["Fe. Entrega Date"] < today])) if not pending_group.empty else 0
-        grouped_rows.append({"MATERIAL_KEY": material_key, "Descripción material": join_unique_values(group["Descripción material"].tolist(), 2), "CANTIDAD PEDIDA": float(group["Ctd. pedido Num"].sum()), "Ctd. Solicitada": float(group["Ctd. Solicitada Num"].sum()) if "Ctd. Solicitada Num" in group.columns else 0.0, "CANTIDAD ENTREGADA": float(delivered_group["Ctd. pedido Num"].sum()) if not delivered_group.empty else 0.0, "CANTIDAD PENDIENTE": float(pending_group["Ctd. pedido Num"].sum()) if not pending_group.empty else 0.0, "PRECIO UNITARIO MEDIO": weighted_price, "PRECIO UNITARIO ULTIMO": last_price, "COSTE PEDIDO": float(group["Importe línea calculado"].sum()), "Nº PEDIDOS": int(group["Nº pedido"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "Nº CESTAS/SOLPEDS": int(group["Nº Cesta / Sol"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "PRIMERA FECHA SOL.": group["Fecha Sol. Date"].min(), "ULTIMA FECHA PED.": group["Fecha Ped. Date"].max(), "FECHA ENTREGA PROXIMA": next_delivery, "FECHA ENTREGA ULTIMA": group["Fe. Entrega Date"].max(), "Elemento PEP": join_unique_values(group["Elemento PEP"].tolist(), 4), "Proveedor": join_unique_values(group["Desc.Proveedor"].tolist(), 3), "VARIOS PRECIOS": "SI" if len(price_values) > 1 else "NO", "Nº PRECIOS DISTINTOS": len(price_values), "LINEAS MATERIAL STATUS": len(group), "LINEAS PENDIENTES VENCIDAS": overdue_count})
+        grouped_rows.append({"MATERIAL_KEY": material_key, "Tipo pedido": join_unique_values(group["Tipo pedido"].tolist(), 4) if "Tipo pedido" in group.columns else "NOT AVAILABLE", "Descripción material": join_unique_values(group["Descripción material"].tolist(), 2), "CANTIDAD PEDIDA": float(group["Ctd. pedido Num"].sum()), "Ctd. Solicitada": float(group["Ctd. Solicitada Num"].sum()) if "Ctd. Solicitada Num" in group.columns else 0.0, "CANTIDAD ENTREGADA": float(delivered_group["Ctd. pedido Num"].sum()) if not delivered_group.empty else 0.0, "CANTIDAD PENDIENTE": float(pending_group["Ctd. pedido Num"].sum()) if not pending_group.empty else 0.0, "PRECIO UNITARIO MEDIO": weighted_price, "PRECIO UNITARIO ULTIMO": last_price, "COSTE PEDIDO": float(group["Importe línea calculado"].sum()), "Nº PEDIDOS": int(group["Nº pedido"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "Nº CESTAS/SOLPEDS": int(group["Nº Cesta / Sol"].replace("NOT AVAILABLE", pd.NA).dropna().nunique()), "PRIMERA FECHA SOL.": group["Fecha Sol. Date"].min(), "ULTIMA FECHA PED.": group["Fecha Ped. Date"].max(), "FECHA ENTREGA PROXIMA": next_delivery, "FECHA ENTREGA ULTIMA": group["Fe. Entrega Date"].max(), "Elemento PEP": join_unique_values(group["Elemento PEP"].tolist(), 4), "Proveedor": join_unique_values(group["Desc.Proveedor"].tolist(), 3), "VARIOS PRECIOS": "SI" if len(price_values) > 1 else "NO", "Nº PRECIOS DISTINTOS": len(price_values), "LINEAS MATERIAL STATUS": len(group), "LINEAS PENDIENTES VENCIDAS": overdue_count})
     return pd.DataFrame(grouped_rows)
 
 
